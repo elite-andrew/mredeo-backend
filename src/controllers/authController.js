@@ -1,5 +1,5 @@
 const bcrypt = require('bcrypt');
-const db = require('../config/database');
+const queryService = require('../services/queryService');
 const config = require('../config/environment');
 const { generateTokens } = require('../middleware/auth');
 const authService = require('../services/authService');
@@ -9,8 +9,8 @@ const signup = async (req, res) => {
   try {
     const { full_name, username, email, phone_number, password } = req.body;
 
-    // Check if user already exists
-    const existingUser = await db.query(
+    // Check if user already exists using optimized query
+    const existingUser = await queryService.query(
       'SELECT id FROM users WHERE username = $1 OR email = $2 OR phone_number = $3',
       [username, email, phone_number]
     );
@@ -22,24 +22,29 @@ const signup = async (req, res) => {
       });
     }
 
-    // Hash password
-    const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
+    // Use transaction for atomic operations
+    const result = await queryService.transaction(async (client) => {
+      // Hash password
+      const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
 
-    // Create user
-    const userResult = await db.query(
-      `INSERT INTO users (full_name, username, email, phone_number, password_hash) 
-       VALUES ($1, $2, $3, $4, $5) RETURNING id, full_name, username, email, phone_number, role`,
-      [full_name, username, email, phone_number, passwordHash]
-    );
+      // Create user
+      const userResult = await client.query(
+        `INSERT INTO users (full_name, username, email, phone_number, password_hash) 
+         VALUES ($1, $2, $3, $4, $5) RETURNING id, full_name, username, email, phone_number, role`,
+        [full_name, username, email, phone_number, passwordHash]
+      );
 
-    const user = userResult.rows[0];
+      const user = result;
 
-    // Generate OTP for verification
-    const otpCode = authService.generateOTP();
-    await db.query(
-      'INSERT INTO otps (user_id, otp_code, purpose, expires_at) VALUES ($1, $2, $3, $4)',
-      [user.id, otpCode, 'signup', new Date(Date.now() + 10 * 60 * 1000)] // 10 minutes
-    );
+      // Generate OTP for verification
+      const otpCode = authService.generateOTP();
+      await client.query(
+        'INSERT INTO otps (user_id, otp_code, purpose, expires_at) VALUES ($1, $2, $3, $4)',
+        [user.id, otpCode, 'signup', new Date(Date.now() + 10 * 60 * 1000)] // 10 minutes
+      );
+
+      return user;
+    });
 
     // Send OTP via SMS
     await smsService.sendOTP(phone_number, otpCode);
