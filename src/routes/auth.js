@@ -32,6 +32,7 @@ router.post('/login',
   authController.login
 );
 
+
 router.post('/forgot-password', 
   authLimiter, 
   authController.forgotPassword
