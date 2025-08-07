@@ -1,5 +1,5 @@
-const { Pool } = require('pg');
-const config = require('./environment');
+ const { Pool } = require('pg');
+ const config = require('./environment');
 
 // Optimized connection pool configuration
 const pool = new Pool({
@@ -50,4 +50,3 @@ process.on('SIGINT', () => {
   pool.end();
 });
 
-module.exports = pool;
