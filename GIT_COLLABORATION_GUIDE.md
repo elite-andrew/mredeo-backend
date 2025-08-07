@@ -52,7 +52,32 @@ git checkout main
 
 ## 🔀 **Handling Team Changes**
 
-### **Scenario 1: Colleague pushed changes to main**
+### **⭐ RECOMMENDED: Pull Request Workflow**
+```bash
+# Team member (Fidelis) workflow:
+git checkout main
+git pull origin main
+git checkout -b feature/database-improvements
+# ... make changes ...
+git add .
+git commit -m "feat: update schema to BIGSERIAL with enhanced precision"
+git push origin feature/database-improvements
+# Create Pull Request on GitHub
+
+# Admin (you) workflow:
+# 1. Review PR on GitHub web interface
+# 2. Test the changes locally if needed:
+git fetch origin
+git checkout feature/database-improvements
+npm test  # Run tests
+# 3. Approve and merge via GitHub UI
+# 4. Clean up:
+git checkout main
+git pull origin main
+git branch -d feature/database-improvements
+```
+
+### **Alternative: Direct Collaboration (Current Method)**
 ```bash
 # Update your local main branch
 git checkout main
