@@ -2,7 +2,26 @@
 
 ## Project Overview
 
-MREDEO Backend is a production-ready Node.js API built for the MREDEO Educational Officers Union. It provides comprehensive functionality for member management, payment processing, notifications, and administrative operations.
+MREDEO Backend is a production-ready Node.js API built for the MREDEO Educational Officers Union. It provides comprehensive functionality for member management, payment ### HTTP Client Setup
+```dart
+import 'package:dio/dio.dart';
+
+class ApiService {
+  final Dio _dio = Dio();
+  
+  ApiService() {
+    _dio.options.baseUrl = 'http://your-api-domain.com/api/v1';
+    _dio.interceptors.add(AuthInterceptor());
+  }
+}
+```
+
+### Authentication Flow
+1. User registration with phone verification
+2. OTP verification to activate account
+3. Login using **phone number or email only** (no username)
+4. Automatic token refresh on expiry
+5. Secure token storagetions, and administrative operations.
 
 ## Features
 
@@ -264,11 +283,49 @@ class ApiService {
 ```
 
 ### Authentication Flow
-1. User registration with phone verification
-2. OTP verification to activate account
-3. Login to receive JWT tokens
-4. Automatic token refresh on expiry
-5. Secure token storage
+1. **User Registration** with phone verification
+2. **OTP Verification** to activate account  
+3. **Login** to receive JWT tokens
+4. **Automatic token refresh** on expiry
+5. **Secure token storage**
+
+### Important Notes
+- 🔑 **Users MUST verify OTP before login** - accounts start inactive for security
+- 🆔 **Flexible login identifiers** - users can login with username, email, or phone number
+- 🔄 **Account activation required** - `/auth/verify-otp` activates the account after signup
+- 🚫 **Inactive account login blocked** - clear error message guides users to verify first
+
+### Example Authentication Flow
+
+#### 1. Signup Request
+```json
+POST /api/v1/auth/signup
+{
+  "full_name": "John Doe",
+  "username": "johndoe", 
+  "email": "john@example.com",
+  "phone_number": "+255700123456",
+  "password": "SecurePass123!"
+}
+```
+
+#### 2. OTP Verification (Required)
+```json
+POST /api/v1/auth/verify-otp
+{
+  "identifier": "+255700123456",
+  "otp_code": "123456"
+}
+```
+
+#### 3. Login (After Activation)
+```json
+POST /api/v1/auth/login
+{
+  "identifier": "johndoe",  // username, email, or phone
+  "password": "SecurePass123!"
+}
+```
 
 ### Best Practices
 - Use `flutter_secure_storage` for token storage

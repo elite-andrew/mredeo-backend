@@ -78,8 +78,34 @@ const sendPasswordResetEmail = async (email, fullName, otpCode) => {
   return await sendEmail(email, subject, htmlContent, textContent);
 };
 
+const sendVerificationOTP = async (email, fullName, otpCode) => {
+  const subject = 'Verify Your MREDEO Account';
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #2c5aa0;">Welcome to MREDEO Union!</h2>
+      <p>Dear ${fullName},</p>
+      <p>Thank you for registering with MREDEO Educational Officers Union. To complete your registration, please verify your email address using the OTP code below:</p>
+      <div style="background-color: #e8f5e8; padding: 20px; text-align: center; font-size: 28px; font-weight: bold; margin: 20px 0; border-radius: 8px; border: 2px solid #4caf50;">
+        ${otpCode}
+      </div>
+      <p style="color: #666;">This verification code will expire in 10 minutes for security purposes.</p>
+      <p>If you didn't create this account, please ignore this email.</p>
+      <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+      <p style="font-size: 12px; color: #888;">
+        Best regards,<br>
+        <strong>MREDEO Union Team</strong><br>
+        Empowering Educational Officers Across Tanzania
+      </p>
+    </div>
+  `;
+  const textContent = `Welcome to MREDEO Union! Your email verification OTP is: ${otpCode}. This code expires in 10 minutes.`;
+  
+  return await sendEmail(email, subject, htmlContent, textContent);
+};
+
 module.exports = {
   sendEmail,
   sendWelcomeEmail,
-  sendPasswordResetEmail
+  sendPasswordResetEmail,
+  sendVerificationOTP
 };
