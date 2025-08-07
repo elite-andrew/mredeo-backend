@@ -7,8 +7,13 @@ const smsService = require('../services/smsService');
 const emailService = require('../services/emailService');
 
 const signup = async (req, res) => {
+  const client = await db.connect();
+  
   try {
     const { full_name, username, email, phone_number, password } = req.body;
+
+    // Start transaction
+    await client.query('BEGIN');
 
     // Check if user already exists (handle optional fields)
     let existingUserQuery = 'SELECT id FROM users WHERE username = $1';
@@ -24,9 +29,10 @@ const signup = async (req, res) => {
       existingUserParams.push(phone_number);
     }
 
-    const existingUser = await db.query(existingUserQuery, existingUserParams);
+    const existingUser = await client.query(existingUserQuery, existingUserParams);
 
     if (existingUser.rows.length > 0) {
+      await client.query('ROLLBACK');
       return res.status(409).json({
         success: false,
         message: 'User with this username, email, or phone number already exists'
@@ -36,21 +42,24 @@ const signup = async (req, res) => {
     // Hash password
     const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
 
-    // Create user (handle optional fields)
-    const userResult = await db.query(
+    // Create user (handle optional fields) - FIX: Use client instead of db
+    const userInsertResult = await client.query(
       `INSERT INTO users (full_name, username, email, phone_number, password_hash) 
        VALUES ($1, $2, $3, $4, $5) RETURNING id, full_name, username, email, phone_number, role`,
       [full_name, username, email || null, phone_number || null, passwordHash]
     );
 
-    const user = userResult.rows[0];
+    const user = userInsertResult.rows[0];
 
     // Generate OTP for verification
     const otpCode = authService.generateOTP();
-    await db.query(
+    await client.query(
       'INSERT INTO otps (user_id, otp_code, purpose, expires_at) VALUES ($1, $2, $3, $4)',
       [user.id, otpCode, 'signup', new Date(Date.now() + 10 * 60 * 1000)] // 10 minutes
     );
+
+    // Commit transaction before sending OTP
+    await client.query('COMMIT');
 
     // Determine if user wants SMS or Email verification
     let verificationMethod = 'phone'; // default
@@ -110,25 +119,33 @@ const signup = async (req, res) => {
       }
     });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Signup error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
     });
+  } finally {
+    client.release();
   }
 };
 
 const verifyOTP = async (req, res) => {
+  const client = await db.connect();
+  
   try {
     const { identifier, otp_code } = req.body;
 
+    await client.query('BEGIN');
+
     // Find user by phone number or email
-    const userQuery = await db.query(
+    const userQuery = await client.query(
       'SELECT id, is_active FROM users WHERE phone_number = $1 OR email = $1',
       [identifier]
     );
 
     if (userQuery.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({
         success: false,
         message: 'User not found'
@@ -138,12 +155,13 @@ const verifyOTP = async (req, res) => {
     const user = userQuery.rows[0];
 
     // Verify OTP
-    const otpQuery = await db.query(
+    const otpQuery = await client.query(
       'SELECT id, expires_at, verified FROM otps WHERE user_id = $1 AND otp_code = $2 AND verified = false ORDER BY created_at DESC LIMIT 1',
       [user.id, otp_code]
     );
 
     if (otpQuery.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(400).json({
         success: false,
         message: 'Invalid or expired OTP'
@@ -153,6 +171,7 @@ const verifyOTP = async (req, res) => {
     const otp = otpQuery.rows[0];
 
     if (new Date() > new Date(otp.expires_at)) {
+      await client.query('ROLLBACK');
       return res.status(400).json({
         success: false,
         message: 'OTP has expired'
@@ -160,19 +179,24 @@ const verifyOTP = async (req, res) => {
     }
 
     // Mark OTP as verified and activate user
-    await db.query('UPDATE otps SET verified = true WHERE id = $1', [otp.id]);
-    await db.query('UPDATE users SET is_active = true WHERE id = $1', [user.id]);
+    await client.query('UPDATE otps SET verified = true WHERE id = $1', [otp.id]);
+    await client.query('UPDATE users SET is_active = true WHERE id = $1', [user.id]);
+
+    await client.query('COMMIT');
 
     res.json({
       success: true,
       message: 'Phone number verified successfully'
     });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('OTP verification error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
     });
+  } finally {
+    client.release();
   }
 };
 
