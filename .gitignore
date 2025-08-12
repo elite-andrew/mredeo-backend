@@ -63,6 +63,15 @@ typings/
 # dotenv environment variables file
 .env
 
+# Service account and credential files
+serviceAccount.json
+service-account.json
+credentials.json
+secrets.json
+*.pem
+*.key
+*.p12
+
 # next.js build output
 .next
 
