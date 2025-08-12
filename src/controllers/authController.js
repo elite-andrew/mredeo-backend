@@ -1,57 +1,110 @@
+// Legacy auth controller (password/OTP) retained for reference. Firebase Auth now handles authentication.
+// This module is no longer used by routes. Consider deleting after data migration is complete.
 const bcrypt = require('bcrypt');
-const queryService = require('../services/queryService');
+const db = require('../config/database');
 const config = require('../config/environment');
-const { generateTokens } = require('../middleware/auth');
+// const { generateTokens } = require('../middleware/auth'); // removed in Firebase migration
 const authService = require('../services/authService');
 const smsService = require('../services/smsService');
+const emailService = require('../services/emailService');
 
 const signup = async (req, res) => {
+  const client = await db.connect();
+  
   try {
     const { full_name, username, email, phone_number, password } = req.body;
 
-    // Check if user already exists using optimized query
-    const existingUser = await queryService.query(
-      'SELECT id FROM users WHERE username = $1 OR email = $2 OR phone_number = $3',
-      [username, email, phone_number]
-    );
+    // Start transaction
+    await client.query('BEGIN');
+
+    // Check if user already exists (handle optional fields)
+    let existingUserQuery = 'SELECT id FROM users WHERE username = $1';
+    let existingUserParams = [username];
+    
+    if (email) {
+      existingUserQuery += ' OR email = $' + (existingUserParams.length + 1);
+      existingUserParams.push(email);
+    }
+    
+    if (phone_number) {
+      existingUserQuery += ' OR phone_number = $' + (existingUserParams.length + 1);
+      existingUserParams.push(phone_number);
+    }
+
+    const existingUser = await client.query(existingUserQuery, existingUserParams);
 
     if (existingUser.rows.length > 0) {
+      await client.query('ROLLBACK');
       return res.status(409).json({
         success: false,
         message: 'User with this username, email, or phone number already exists'
       });
     }
 
-    // Use transaction for atomic operations
-    const result = await queryService.transaction(async (client) => {
-      // Hash password
-      const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, config.security.bcryptRounds);
 
-      // Create user
-      const userResult = await client.query(
-        `INSERT INTO users (full_name, username, email, phone_number, password_hash) 
-         VALUES ($1, $2, $3, $4, $5) RETURNING id, full_name, username, email, phone_number, role`,
-        [full_name, username, email, phone_number, passwordHash]
-      );
+    // Create user (handle optional fields) - FIX: Use client instead of db
+    const userInsertResult = await client.query(
+      `INSERT INTO users (full_name, username, email, phone_number, password_hash) 
+       VALUES ($1, $2, $3, $4, $5) RETURNING id, full_name, username, email, phone_number, role`,
+      [full_name, username, email || null, phone_number || null, passwordHash]
+    );
 
-      const user = result;
+    const user = userInsertResult.rows[0];
 
-      // Generate OTP for verification
-      const otpCode = authService.generateOTP();
-      await client.query(
-        'INSERT INTO otps (user_id, otp_code, purpose, expires_at) VALUES ($1, $2, $3, $4)',
-        [user.id, otpCode, 'signup', new Date(Date.now() + 10 * 60 * 1000)] // 10 minutes
-      );
+    // Generate OTP for verification
+    const otpCode = authService.generateOTP();
+    await client.query(
+      'INSERT INTO otps (user_id, otp_code, purpose, expires_at) VALUES ($1, $2, $3, $4)',
+      [user.id, otpCode, 'signup', new Date(Date.now() + 10 * 60 * 1000)] // 10 minutes
+    );
 
-      return user;
-    });
+    // Commit transaction before sending OTP
+    await client.query('COMMIT');
 
-    // Send OTP via SMS
-    await smsService.sendOTP(phone_number, otpCode);
+    // Determine if user wants SMS or Email verification
+    let verificationMethod = 'phone'; // default
+    let verificationTarget = phone_number;
+    let successMessage = 'User registered successfully. Please verify your phone number with the OTP sent via SMS.';
+
+    // Check if user provided email and no phone (email-only signup)
+    if (email && !phone_number) {
+      verificationMethod = 'email';
+      verificationTarget = email;
+      successMessage = 'User registered successfully. Please check your email for the verification OTP.';
+    }
+    // If both email and phone provided, prefer phone for primary verification
+    else if (phone_number) {
+      verificationMethod = 'phone';
+      verificationTarget = phone_number;
+      successMessage = 'User registered successfully. Please verify your phone number with the OTP sent via SMS.';
+    }
+    // If only email provided
+    else if (email) {
+      verificationMethod = 'email';
+      verificationTarget = email;
+      successMessage = 'User registered successfully. Please check your email for the verification OTP.';
+    }
+
+    // Send OTP based on verification method
+    try {
+      if (verificationMethod === 'email') {
+        await emailService.sendVerificationOTP(email, full_name, otpCode);
+        console.log(`✉️ Verification OTP sent to email: ${email}`);
+      } else {
+        await smsService.sendOTP(phone_number, otpCode);
+        console.log(`📱 Verification OTP sent to phone: ${phone_number}`);
+      }
+    } catch (otpError) {
+      console.error('OTP sending error:', otpError);
+      // Still return success but with a note about delivery
+      successMessage += ' Note: There may be a delay in OTP delivery.';
+    }
 
     res.status(201).json({
       success: true,
-      message: 'User registered successfully. Please verify your phone number with the OTP sent.',
+      message: successMessage,
       data: {
         user: {
           id: user.id,
@@ -60,29 +113,41 @@ const signup = async (req, res) => {
           email: user.email,
           phone_number: user.phone_number,
           role: user.role
+        },
+        verification: {
+          method: verificationMethod,
+          target: verificationMethod === 'email' ? email : phone_number
         }
       }
     });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Signup error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
     });
+  } finally {
+    client.release();
   }
 };
 
 const verifyOTP = async (req, res) => {
+  const client = await db.connect();
+  
   try {
     const { identifier, otp_code } = req.body;
 
+    await client.query('BEGIN');
+
     // Find user by phone number or email
-    const userQuery = await db.query(
+    const userQuery = await client.query(
       'SELECT id, is_active FROM users WHERE phone_number = $1 OR email = $1',
       [identifier]
     );
 
     if (userQuery.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({
         success: false,
         message: 'User not found'
@@ -92,12 +157,13 @@ const verifyOTP = async (req, res) => {
     const user = userQuery.rows[0];
 
     // Verify OTP
-    const otpQuery = await db.query(
+    const otpQuery = await client.query(
       'SELECT id, expires_at, verified FROM otps WHERE user_id = $1 AND otp_code = $2 AND verified = false ORDER BY created_at DESC LIMIT 1',
       [user.id, otp_code]
     );
 
     if (otpQuery.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(400).json({
         success: false,
         message: 'Invalid or expired OTP'
@@ -107,6 +173,7 @@ const verifyOTP = async (req, res) => {
     const otp = otpQuery.rows[0];
 
     if (new Date() > new Date(otp.expires_at)) {
+      await client.query('ROLLBACK');
       return res.status(400).json({
         success: false,
         message: 'OTP has expired'
@@ -114,19 +181,24 @@ const verifyOTP = async (req, res) => {
     }
 
     // Mark OTP as verified and activate user
-    await db.query('UPDATE otps SET verified = true WHERE id = $1', [otp.id]);
-    await db.query('UPDATE users SET is_active = true WHERE id = $1', [user.id]);
+    await client.query('UPDATE otps SET verified = true WHERE id = $1', [otp.id]);
+    await client.query('UPDATE users SET is_active = true WHERE id = $1', [user.id]);
+
+    await client.query('COMMIT');
 
     res.json({
       success: true,
       message: 'Phone number verified successfully'
     });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('OTP verification error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error'
     });
+  } finally {
+    client.release();
   }
 };
 
@@ -134,7 +206,7 @@ const login = async (req, res) => {
   try {
     const { identifier, password } = req.body;
 
-    // Find user by phone number or email
+    // Find user by phone number or email only (no username)
     const userQuery = await db.query(
       `SELECT id, full_name, username, email, phone_number, password_hash, role, is_active, is_deleted 
        FROM users WHERE (phone_number = $1 OR email = $1) AND is_deleted = false`,
@@ -153,7 +225,7 @@ const login = async (req, res) => {
     if (!user.is_active) {
       return res.status(401).json({
         success: false,
-        message: 'Account is not active. Please verify your phone number.'
+        message: 'Account is not active. Please verify your phone number first.'
       });
     }
 
@@ -167,7 +239,7 @@ const login = async (req, res) => {
     }
 
     // Generate tokens
-    const tokens = generateTokens(user.id, user.role);
+  // const tokens = generateTokens(user.id, user.role); // deprecated
 
     res.json({
       success: true,
@@ -181,7 +253,7 @@ const login = async (req, res) => {
           phone_number: user.phone_number,
           role: user.role
         },
-        ...tokens
+  // tokens: tokens // deprecated
       }
     });
   } catch (error) {

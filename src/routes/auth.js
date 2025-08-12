@@ -1,50 +1,17 @@
 const express = require('express');
 const router = express.Router();
-const authController = require('../controllers/authController');
-const { authenticateToken, refreshAccessToken } = require('../middleware/auth');
-const { 
-  validateSignup, 
-  validateLogin, 
-  validateOTP, 
-  validatePasswordReset 
-} = require('../middleware/validation');
-const { authLimiter, otpLimiter } = require('../middleware/rateLimiter');
+const { authenticateToken } = require('../middleware/auth');
+const { authLimiter } = require('../middleware/rateLimiter');
 const { auditMiddleware } = require('../middleware/audit');
 
-// Public routes with rate limiting
-router.post('/signup', 
-  authLimiter, 
-  validateSignup, 
-  auditMiddleware.userSignup, 
-  authController.signup
-);
+// All authentication is handled by Firebase client SDK.
+// This backend exposes only protected endpoints that require a valid Firebase ID token.
 
-router.post('/verify-otp', 
-  otpLimiter, 
-  validateOTP, 
-  authController.verifyOTP
-);
-
-router.post('/login', 
-  authLimiter, 
-  validateLogin, 
-  auditMiddleware.userLogin, 
-  authController.login
-);
-
-router.post('/forgot-password', 
-  authLimiter, 
-  authController.forgotPassword
-);
-
-router.post('/reset-password', 
-  authLimiter, 
-  validatePasswordReset, 
-  auditMiddleware.passwordReset, 
-  authController.resetPassword
-);
-
-router.post('/refresh-token', refreshAccessToken);
+// Introspection: get current user
+router.get('/me', authenticateToken, (req, res) => {
+  const { firebase, ...user } = req.user || {};
+  res.json({ success: true, data: { user, firebaseClaims: firebase || {} } });
+});
 
 // Protected routes
 router.post('/logout', 

@@ -1,11 +1,32 @@
-const { Pool } = require('pg');
-const config = require('./environment');
+ const { Pool } = require('pg');
+ const config = require('./environment');
 
-// Optimized connection pool configuration
-const pool = new Pool({
-  connectionString: config.database.url,
-  ssl: config.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  
+// Database connection configuration
+let poolConfig = {};
+
+const hasValidUrl = typeof config.database.url === 'string' && config.database.url.trim().length > 0;
+const useUrl = process.env.DB_USE_URL === 'true' && hasValidUrl;
+if (useUrl) {
+  // Use connection string if explicitly enabled
+  poolConfig = {
+    connectionString: config.database.url,
+    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  };
+} else {
+  // Use individual connection parameters
+  poolConfig = {
+    host: config.database.host,
+    port: config.database.port,
+    database: config.database.database,
+    user: config.database.username,
+    password: config.database.password,
+    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+  };
+}
+
+// Add connection pool optimization
+poolConfig = {
+  ...poolConfig,
   // Connection pool optimization
   max: 50, // Increased from 20 for better concurrency
   min: 5,  // Minimum connections to maintain
@@ -24,7 +45,10 @@ const pool = new Pool({
   // Keep connections alive
   keepAlive: true,
   keepAliveInitialDelayMillis: 10000,
-});
+};
+
+// Optimized connection pool configuration
+const pool = new Pool(poolConfig);
 
 // Enhanced error handling
 pool.on('error', (err) => {

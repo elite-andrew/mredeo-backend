@@ -26,7 +26,7 @@ app.use(helmet({
 
 app.use(cors({
   origin: config.NODE_ENV === 'production' 
-    ? ['https://your-flutter-app-domain.com'] // Replace with your Flutter app domain
+    ? ['com.example.mredeo_app'] // Replace with your Flutter app domain
     : true,
   credentials: true
 }));

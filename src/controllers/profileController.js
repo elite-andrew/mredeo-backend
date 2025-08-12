@@ -1,4 +1,4 @@
-const bcrypt = require('bcrypt');
+// Passwords are managed by Firebase Authentication; no bcrypt checks needed here.
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
@@ -214,46 +214,11 @@ const uploadProfilePicture = async (req, res) => {
 };
 
 const changePassword = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { current_password, new_password } = req.body;
-
-    // Validate current password
-    const userQuery = await db.query(
-      'SELECT password_hash FROM users WHERE id = $1',
-      [userId]
-    );
-
-    const user = userQuery.rows[0];
-    const passwordMatch = await bcrypt.compare(current_password, user.password_hash);
-
-    if (!passwordMatch) {
-      return res.status(400).json({
-        success: false,
-        message: 'Current password is incorrect'
-      });
-    }
-
-    // Hash new password
-    const newPasswordHash = await bcrypt.hash(new_password, config.security.bcryptRounds);
-
-    // Update password
-    await db.query(
-      'UPDATE users SET password_hash = $1 WHERE id = $2',
-      [newPasswordHash, userId]
-    );
-
-    res.json({
-      success: true,
-      message: 'Password changed successfully'
-    });
-  } catch (error) {
-    console.error('Change password error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
-  }
+  // Redirect password changes to Firebase client SDK
+  return res.status(400).json({
+    success: false,
+    message: 'Change password via Firebase Authentication on the client.'
+  });
 };
 
 const updateSettings = async (req, res) => {
@@ -341,40 +306,15 @@ const updateSettings = async (req, res) => {
 const deleteAccount = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { password } = req.body;
-
-    // Verify password before deletion
-    const userQuery = await db.query(
-      'SELECT password_hash FROM users WHERE id = $1',
-      [userId]
-    );
-
-    const user = userQuery.rows[0];
-    const passwordMatch = await bcrypt.compare(password, user.password_hash);
-
-    if (!passwordMatch) {
-      return res.status(400).json({
-        success: false,
-        message: 'Password is incorrect'
-      });
-    }
-
     // Soft delete - mark as deleted instead of actual deletion
     await db.query(
       'UPDATE users SET is_deleted = true, is_active = false WHERE id = $1',
       [userId]
     );
-
-    res.json({
-      success: true,
-      message: 'Account deleted successfully'
-    });
+    res.json({ success: true, message: 'Account deleted successfully' });
   } catch (error) {
     console.error('Delete account error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error'
-    });
+    res.status(500).json({ success: false, message: 'Internal server error' });
   }
 };
 

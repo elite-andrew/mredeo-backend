@@ -6,15 +6,16 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Users table
 CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id BIGSERIAL PRIMARY KEY NOT NULL,
+    firebase_uid VARCHAR(128) UNIQUE,
     full_name VARCHAR(100) NOT NULL,
     username VARCHAR(50) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE,
-    phone_number VARCHAR(20) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
+    phone_number VARCHAR(20) UNIQUE,
+    -- password_hash removed in Firebase migration
     profile_picture VARCHAR(500),
     role VARCHAR(30) DEFAULT 'member' CHECK (role IN ('member', 'admin_chairperson', 'admin_secretary', 'admin_signatory')),
-    is_active BOOLEAN DEFAULT false,
+    is_active BOOLEAN DEFAULT true,
     is_deleted BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -22,8 +23,8 @@ CREATE TABLE users (
 
 -- User settings table
 CREATE TABLE user_settings (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    id BIGSERIAL PRIMARY KEY NOT NULL,
+    user_id BIGSERIAL REFERENCES users(id) ON DELETE CASCADE,
     language VARCHAR(10) DEFAULT 'en',
     dark_mode BOOLEAN DEFAULT false,
     notifications_enabled BOOLEAN DEFAULT true,
@@ -35,8 +36,8 @@ CREATE TABLE user_settings (
 
 -- OTPs table
 CREATE TABLE otps (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    id BIGSERIAL PRIMARY KEY NOT NULL,
+    user_id BIGSERIAL REFERENCES users(id) ON DELETE CASCADE,
     otp_code VARCHAR(6) NOT NULL,
     purpose VARCHAR(20) NOT NULL CHECK (purpose IN ('signup', 'login', 'reset_password')),
     verified BOOLEAN DEFAULT false,
@@ -47,37 +48,35 @@ CREATE TABLE otps (
 
 -- Contribution types table
 CREATE TABLE contribution_types (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id BIGSERIAL PRIMARY KEY NOT NULL,
     name VARCHAR(100) UNIQUE NOT NULL,
-    amount DECIMAL(10,2) NOT NULL,
+    amount DECIMAL(15,2) NOT NULL,
     description TEXT,
     is_active BOOLEAN DEFAULT true,
-    created_by UUID REFERENCES users(id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_by BIGSERIAL REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Payments table
 CREATE TABLE payments (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    contribution_type_id UUID REFERENCES contribution_types(id),
-    amount_paid DECIMAL(10,2) NOT NULL,
+    id BIGSERIAL PRIMARY KEY NOT NULL,
+    user_id BIGSERIAL REFERENCES users(id) ON DELETE CASCADE,
+    contribution_type_id BIGSERIAL REFERENCES contribution_types(id),
+    amount_paid DECIMAL(15,2) NOT NULL,
     telco VARCHAR(20) NOT NULL CHECK (telco IN ('vodacom', 'tigo', 'airtel', 'halotel', 'zantel', 'other')),
     phone_number_used VARCHAR(20) NOT NULL,
     transaction_reference VARCHAR(100) UNIQUE NOT NULL,
     payment_status VARCHAR(20) DEFAULT 'pending' CHECK (payment_status IN ('pending', 'success', 'failed', 'cancelled')),
     paid_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Issued payments table (admin payments to members)
 CREATE TABLE issued_payments (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    issued_by UUID REFERENCES users(id),
-    issued_to UUID REFERENCES users(id),
-    amount DECIMAL(10,2) NOT NULL,
+    id BIGSERIAL PRIMARY KEY NOT NULL,
+    issued_by BIGSERIAL REFERENCES users(id),
+    issued_to BIGSERIAL REFERENCES users(id),
+    amount DECIMAL(15,2) NOT NULL,
     purpose TEXT NOT NULL,
     transaction_reference VARCHAR(100) UNIQUE NOT NULL,
     issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -86,8 +85,8 @@ CREATE TABLE issued_payments (
 
 -- Notifications table
 CREATE TABLE notifications (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    sender_id UUID REFERENCES users(id),
+    id BIGSERIAL PRIMARY KEY NOT NULL,
+    sender_id BIGSERIAL REFERENCES users(id),
     title VARCHAR(100) NOT NULL,
     message TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -95,9 +94,9 @@ CREATE TABLE notifications (
 
 -- Notification reads table (tracks who has read what)
 CREATE TABLE notification_reads (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    notification_id UUID REFERENCES notifications(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+    id BIGSERIAL PRIMARY KEY NOT NULL,
+    notification_id BIGSERIAL REFERENCES notifications(id) ON DELETE CASCADE,
+    user_id BIGSERIAL REFERENCES users(id) ON DELETE CASCADE,
     is_read BOOLEAN DEFAULT false,
     read_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -106,20 +105,20 @@ CREATE TABLE notification_reads (
 
 -- Audit logs table
 CREATE TABLE audit_logs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id),
+    id BIGSERIAL PRIMARY KEY NOT NULL,
+    user_id BIGSERIAL REFERENCES users(id) ON DELETE CASCADE,
     action VARCHAR(50) NOT NULL,
-    target_id UUID,
+    target_id BIGSERIAL,
     metadata JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Payment activities table (for tracking payment-related activities)
 CREATE TABLE payment_activities (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID REFERENCES users(id),
+    id BIGSERIAL PRIMARY KEY NOT NULL,
+    user_id BIGSERIAL REFERENCES users(id),
     action VARCHAR(50) NOT NULL,
-    amount DECIMAL(10,2),
+    amount DECIMAL(15,2),
     recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -130,6 +129,7 @@ CREATE INDEX idx_users_username ON users(username);
 CREATE INDEX idx_users_role ON users(role);
 CREATE INDEX idx_users_active ON users(is_active);
 CREATE INDEX idx_users_deleted ON users(is_deleted);
+CREATE INDEX idx_users_firebase_uid ON users(firebase_uid);
 
 CREATE INDEX idx_otps_user_id ON otps(user_id);
 CREATE INDEX idx_otps_code ON otps(otp_code);
@@ -183,16 +183,7 @@ INSERT INTO contribution_types (name, amount, description, created_by) VALUES
 
 -- Insert default admin user (password: Admin@123)
 -- Note: In production, create this user through the API with a secure password
-INSERT INTO users (full_name, username, email, phone_number, password_hash, role, is_active) VALUES
-(
-    'System Administrator',
-    'admin',
-    'admin@mredeo.org',
-    '+255700000000',
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/lewdhBIUoCC9VFQYm', -- Admin@123
-    'admin_chairperson',
-    true
-);
+-- Default admin seeding via Firebase is recommended. Create an admin in Firebase Auth and then insert a user row with the firebase_uid if needed.
 
 -- Create a view for user statistics
 CREATE VIEW user_stats AS

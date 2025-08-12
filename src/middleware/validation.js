@@ -28,19 +28,37 @@ const validateSignup = [
     .normalizeEmail()
     .withMessage('Valid email required'),
   body('phone_number')
+    .optional()
     .isMobilePhone()
     .withMessage('Valid phone number required'),
   body('password')
     .isLength({ min: 8 })
     .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
     .withMessage('Password must be at least 8 characters with uppercase, lowercase, number, and special character'),
+  // Custom validation to ensure either email or phone is provided
+  body().custom((value, { req }) => {
+    if (!req.body.email && !req.body.phone_number) {
+      throw new Error('Either email or phone number must be provided');
+    }
+    return true;
+  }),
   handleValidationErrors
 ];
 
 const validateLogin = [
   body('identifier')
     .notEmpty()
-    .withMessage('Phone number or email required'),
+    .withMessage('Phone number or email required')
+    .custom(value => {
+      // Check if it's either an email or phone number format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+      
+      if (!emailRegex.test(value) && !phoneRegex.test(value)) {
+        throw new Error('Identifier must be a valid email or phone number');
+      }
+      return true;
+    }),
   body('password')
     .notEmpty()
     .withMessage('Password required'),
@@ -54,7 +72,17 @@ const validateOTP = [
     .withMessage('OTP must be 6 digits'),
   body('identifier')
     .notEmpty()
-    .withMessage('Phone number or email required'),
+    .withMessage('Phone number or email required')
+    .custom(value => {
+      // Check if it's either an email or phone number format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const phoneRegex = /^\+?[1-9]\d{1,14}$/;
+      
+      if (!emailRegex.test(value) && !phoneRegex.test(value)) {
+        throw new Error('Identifier must be a valid email or phone number');
+      }
+      return true;
+    }),
   handleValidationErrors
 ];
 
