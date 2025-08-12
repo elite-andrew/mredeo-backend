@@ -22,7 +22,7 @@ router.post('/upload-picture',
 );
 
 router.put('/change-password', 
-  auditMiddleware.passwordReset, 
+  auditMiddleware.profileUpdate, 
   profileController.changePassword
 );
 

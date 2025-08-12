@@ -1,7 +1,9 @@
+// Legacy auth controller (password/OTP) retained for reference. Firebase Auth now handles authentication.
+// This module is no longer used by routes. Consider deleting after data migration is complete.
 const bcrypt = require('bcrypt');
 const db = require('../config/database');
 const config = require('../config/environment');
-const { generateTokens } = require('../middleware/auth');
+// const { generateTokens } = require('../middleware/auth'); // removed in Firebase migration
 const authService = require('../services/authService');
 const smsService = require('../services/smsService');
 const emailService = require('../services/emailService');
@@ -237,7 +239,7 @@ const login = async (req, res) => {
     }
 
     // Generate tokens
-    const tokens = generateTokens(user.id, user.role);
+  // const tokens = generateTokens(user.id, user.role); // deprecated
 
     res.json({
       success: true,
@@ -251,7 +253,7 @@ const login = async (req, res) => {
           phone_number: user.phone_number,
           role: user.role
         },
-        ...tokens
+  // tokens: tokens // deprecated
       }
     });
   } catch (error) {

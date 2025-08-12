@@ -7,14 +7,15 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Users table
 CREATE TABLE users (
     id BIGSERIAL PRIMARY KEY NOT NULL,
+    firebase_uid VARCHAR(128) UNIQUE,
     full_name VARCHAR(100) NOT NULL,
     username VARCHAR(50) UNIQUE NOT NULL,
     email VARCHAR(255) UNIQUE,
-    phone_number VARCHAR(20) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
+    phone_number VARCHAR(20) UNIQUE,
+    -- password_hash removed in Firebase migration
     profile_picture VARCHAR(500),
     role VARCHAR(30) DEFAULT 'member' CHECK (role IN ('member', 'admin_chairperson', 'admin_secretary', 'admin_signatory')),
-    is_active BOOLEAN DEFAULT false,
+    is_active BOOLEAN DEFAULT true,
     is_deleted BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -120,8 +121,6 @@ CREATE TABLE payment_activities (
     amount DECIMAL(15,2),
     recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
 
 -- Indexes for better performance
 CREATE INDEX idx_users_email ON users(email);
@@ -130,6 +129,7 @@ CREATE INDEX idx_users_username ON users(username);
 CREATE INDEX idx_users_role ON users(role);
 CREATE INDEX idx_users_active ON users(is_active);
 CREATE INDEX idx_users_deleted ON users(is_deleted);
+CREATE INDEX idx_users_firebase_uid ON users(firebase_uid);
 
 CREATE INDEX idx_otps_user_id ON otps(user_id);
 CREATE INDEX idx_otps_code ON otps(otp_code);
@@ -183,16 +183,7 @@ INSERT INTO contribution_types (name, amount, description, created_by) VALUES
 
 -- Insert default admin user (password: Admin@123)
 -- Note: In production, create this user through the API with a secure password
-INSERT INTO users (full_name, username, email, phone_number, password_hash, role, is_active) VALUES
-(
-    'System Administrator',
-    'admin',
-    'admin@mredeo.org',
-    '+255700000000',
-    '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/lewdhBIUoCC9VFQYm', -- Admin@123
-    'admin_chairperson',
-    true
-);
+-- Default admin seeding via Firebase is recommended. Create an admin in Firebase Auth and then insert a user row with the firebase_uid if needed.
 
 -- Create a view for user statistics
 CREATE VIEW user_stats AS

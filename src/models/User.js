@@ -4,8 +4,20 @@ class User {
   static async findById(id) {
     try {
       const result = await db.query(
-        'SELECT id, full_name, username, email, phone_number, profile_picture, role, is_active, is_deleted, created_at, updated_at FROM users WHERE id = $1',
+        'SELECT id, firebase_uid, full_name, username, email, phone_number, profile_picture, role, is_active, is_deleted, created_at, updated_at FROM users WHERE id = $1',
         [id]
+      );
+      return result.rows[0] || null;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  static async findByFirebaseUid(uid) {
+    try {
+      const result = await db.query(
+        'SELECT id, firebase_uid, full_name, username, email, phone_number, profile_picture, role, is_active, is_deleted, created_at FROM users WHERE firebase_uid = $1 AND is_deleted = false',
+        [uid]
       );
       return result.rows[0] || null;
     } catch (error) {
@@ -16,7 +28,7 @@ class User {
   static async findByIdentifier(identifier) {
     try {
       const result = await db.query(
-        `SELECT id, full_name, username, email, phone_number, password_hash, role, is_active, is_deleted, created_at 
+        `SELECT id, firebase_uid, full_name, username, email, phone_number, role, is_active, is_deleted, created_at 
          FROM users WHERE (email = $1 OR phone_number = $1 OR username = $1) AND is_deleted = false`,
         [identifier]
       );
@@ -28,13 +40,13 @@ class User {
 
   static async create(userData) {
     try {
-      const { full_name, username, email, phone_number, password_hash, role = 'member' } = userData;
+      const { firebase_uid, full_name, username, email, phone_number, role = 'member', is_active = true } = userData;
       
       const result = await db.query(
-        `INSERT INTO users (full_name, username, email, phone_number, password_hash, role)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, full_name, username, email, phone_number, role, created_at`,
-        [full_name, username, email, phone_number, password_hash, role]
+        `INSERT INTO users (firebase_uid, full_name, username, email, phone_number, role, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, firebase_uid, full_name, username, email, phone_number, role, is_active, created_at`,
+        [firebase_uid, full_name, username, email, phone_number, role, is_active]
       );
       
       return result.rows[0];
@@ -124,7 +136,7 @@ class User {
       queryParams.push(offset);
 
       const usersResult = await db.query(
-        `SELECT id, full_name, username, email, phone_number, profile_picture, role, is_active, created_at
+  `SELECT id, firebase_uid, full_name, username, email, phone_number, profile_picture, role, is_active, created_at
          FROM users WHERE ${whereClause}
          ORDER BY created_at DESC
          LIMIT $${paramCount - 1} OFFSET $${paramCount}`,

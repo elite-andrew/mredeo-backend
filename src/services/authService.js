@@ -8,15 +8,13 @@ const generateSecureToken = (length = 32) => {
   return crypto.randomBytes(length).toString('hex');
 };
 
-const hashPassword = async (password) => {
-  const bcrypt = require('bcrypt');
-  const config = require('../config/environment');
-  return await bcrypt.hash(password, config.security.bcryptRounds);
+// Deprecated: Passwords are managed by Firebase Authentication
+const hashPassword = async () => {
+  throw new Error('hashPassword is deprecated. Use Firebase Authentication.');
 };
 
-const verifyPassword = async (password, hashedPassword) => {
-  const bcrypt = require('bcrypt');
-  return await bcrypt.compare(password, hashedPassword);
+const verifyPassword = async () => {
+  throw new Error('verifyPassword is deprecated. Use Firebase Authentication.');
 };
 
 module.exports = {

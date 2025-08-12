@@ -4,11 +4,13 @@
 // Database connection configuration
 let poolConfig = {};
 
-if (config.database.url) {
-  // Use connection string if available
+const hasValidUrl = typeof config.database.url === 'string' && config.database.url.trim().length > 0;
+const useUrl = process.env.DB_USE_URL === 'true' && hasValidUrl;
+if (useUrl) {
+  // Use connection string if explicitly enabled
   poolConfig = {
     connectionString: config.database.url,
-    ssl: config.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
   };
 } else {
   // Use individual connection parameters
@@ -18,7 +20,7 @@ if (config.database.url) {
     database: config.database.database,
     user: config.database.username,
     password: config.database.password,
-    ssl: config.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
   };
 }
 
