@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { PAYMENT_STATUS } = require('../config/constants');
+const { updateContributionStatusOnPayment } = require('./contributionController');
 
 const makePayment = async (req, res) => {
   try {
@@ -292,10 +293,130 @@ const getPaymentsReport = async (req, res) => {
   }
 };
 
+// Confirm/Update payment status (simulate payment gateway callback)
+const confirmPayment = async (req, res) => {
+  try {
+    const { transactionReference, status } = req.body;
+    
+    // Find payment by transaction reference
+    const paymentQuery = await db.query(
+      'SELECT * FROM payments WHERE transaction_reference = $1',
+      [transactionReference]
+    );
+
+    if (paymentQuery.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+    }
+
+    const payment = paymentQuery.rows[0];
+
+    // Update payment status
+    const updateQuery = await db.query(
+      `UPDATE payments 
+       SET payment_status = $1, paid_at = CASE WHEN $1 = 'success' THEN CURRENT_TIMESTAMP ELSE paid_at END
+       WHERE transaction_reference = $2
+       RETURNING *`,
+      [status, transactionReference]
+    );
+
+    const updatedPayment = updateQuery.rows[0];
+
+    // If payment is successful, update contribution status
+    if (status === 'success') {
+      await updateContributionStatusOnPayment(
+        updatedPayment.id,
+        updatedPayment.user_id,
+        updatedPayment.contribution_type_id,
+        updatedPayment.amount_paid
+      );
+    }
+
+    res.json({
+      success: true,
+      data: { payment: updatedPayment },
+      message: `Payment ${status} successfully`
+    });
+
+  } catch (error) {
+    console.error('Confirm payment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+// Simulate successful payment (for development/testing)
+const simulateSuccessfulPayment = async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    const userId = req.user.id;
+
+    // Get payment details
+    const paymentQuery = await db.query(
+      'SELECT * FROM payments WHERE id = $1 AND user_id = $2',
+      [paymentId, userId]
+    );
+
+    if (paymentQuery.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+    }
+
+    const payment = paymentQuery.rows[0];
+
+    if (payment.payment_status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment is not in pending status'
+      });
+    }
+
+    // Update to success
+    const updateQuery = await db.query(
+      `UPDATE payments 
+       SET payment_status = 'success', paid_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING *`,
+      [paymentId]
+    );
+
+    const updatedPayment = updateQuery.rows[0];
+
+    // Update contribution status
+    await updateContributionStatusOnPayment(
+      updatedPayment.id,
+      updatedPayment.user_id,
+      updatedPayment.contribution_type_id,
+      updatedPayment.amount_paid
+    );
+
+    res.json({
+      success: true,
+      data: { payment: updatedPayment },
+      message: 'Payment confirmed successfully'
+    });
+
+  } catch (error) {
+    console.error('Simulate payment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   makePayment,
   getPaymentHistory,
   getPaymentDetails,
   issuePayment,
-  getPaymentsReport
+  getPaymentsReport,
+  confirmPayment,
+  simulateSuccessfulPayment
 };

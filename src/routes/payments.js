@@ -27,6 +27,15 @@ router.get('/:paymentId',
   paymentController.getPaymentDetails
 );
 
+// Payment confirmation routes
+router.post('/confirm', paymentController.confirmPayment);
+
+// Development/testing route to simulate successful payments
+router.post('/:paymentId/simulate-success',
+  isMember,
+  paymentController.simulateSuccessfulPayment
+);
+
 // Admin routes
 router.post('/issue', 
   canIssuePayments, 

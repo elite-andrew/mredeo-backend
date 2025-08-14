@@ -89,7 +89,27 @@ CREATE TABLE notifications (
     sender_id BIGSERIAL REFERENCES users(id),
     title VARCHAR(100) NOT NULL,
     message TEXT NOT NULL,
+    notification_type VARCHAR(20) DEFAULT 'general' CHECK (notification_type IN ('general', 'contribution_request', 'payment_reminder')),
+    contribution_type_id BIGSERIAL REFERENCES contribution_types(id),
+    due_date DATE,
+    is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- User contribution status table (tracks each user's payment status for each contribution request)
+CREATE TABLE user_contribution_status (
+    id BIGSERIAL PRIMARY KEY NOT NULL,
+    user_id BIGSERIAL REFERENCES users(id) ON DELETE CASCADE,
+    notification_id BIGSERIAL REFERENCES notifications(id) ON DELETE CASCADE,
+    contribution_type_id BIGSERIAL REFERENCES contribution_types(id),
+    required_amount DECIMAL(15,2) NOT NULL,
+    paid_amount DECIMAL(15,2) DEFAULT 0.00,
+    payment_status VARCHAR(20) DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid', 'partial', 'paid', 'overdue')),
+    last_payment_id BIGSERIAL REFERENCES payments(id),
+    last_paid_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, notification_id, contribution_type_id)
 );
 
 -- Notification reads table (tracks who has read what)
@@ -143,6 +163,13 @@ CREATE INDEX idx_payments_transaction ON payments(transaction_reference);
 
 CREATE INDEX idx_notifications_sender ON notifications(sender_id);
 CREATE INDEX idx_notifications_created ON notifications(created_at);
+CREATE INDEX idx_notifications_type ON notifications(notification_type);
+CREATE INDEX idx_notifications_contribution_type ON notifications(contribution_type_id);
+
+CREATE INDEX idx_user_contribution_status_user ON user_contribution_status(user_id);
+CREATE INDEX idx_user_contribution_status_notification ON user_contribution_status(notification_id);
+CREATE INDEX idx_user_contribution_status_contribution_type ON user_contribution_status(contribution_type_id);
+CREATE INDEX idx_user_contribution_status_payment_status ON user_contribution_status(payment_status);
 
 CREATE INDEX idx_notification_reads_user ON notification_reads(user_id);
 CREATE INDEX idx_notification_reads_notification ON notification_reads(notification_id);
@@ -174,10 +201,13 @@ CREATE TRIGGER update_contribution_types_updated_at BEFORE UPDATE ON contributio
 CREATE TRIGGER update_payments_updated_at BEFORE UPDATE ON payments
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
+CREATE TRIGGER update_user_contribution_status_updated_at BEFORE UPDATE ON user_contribution_status
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- Insert default contribution types
 INSERT INTO contribution_types (name, amount, description, created_by) VALUES
-('Annual Membership Fee', 50000.00, 'Annual membership fee for active participation', NULL),
-('Emergency Fund', 15000.00, 'Emergency fund for member assistance', NULL),
+('Annual Membership Fee', 300000.00, 'Annual membership fee for active participation', NULL),
+('Emergency Fund', 50000.00, 'Emergency fund for member assistance', NULL),
 ('Special Project Fund', 25000.00, 'Contribution for special union projects and initiatives', NULL);
 
 -- Insert default admin user (password: Admin@123)
@@ -218,8 +248,9 @@ COMMENT ON TABLE otps IS 'One-time passwords for verification';
 COMMENT ON TABLE contribution_types IS 'Types of contributions/payments';
 COMMENT ON TABLE payments IS 'Payment transactions from members';
 COMMENT ON TABLE issued_payments IS 'Payments issued by admins to members';
-COMMENT ON TABLE notifications IS 'System notifications';
+COMMENT ON TABLE notifications IS 'System notifications and contribution requests';
 COMMENT ON TABLE notification_reads IS 'Tracking notification read status';
+COMMENT ON TABLE user_contribution_status IS 'Tracks individual user payment status for each contribution request';
 COMMENT ON TABLE audit_logs IS 'System activity audit trail';
 
 COMMENT ON COLUMN users.role IS 'User role: member, admin_chairperson, admin_secretary, admin_signatory';
