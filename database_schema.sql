@@ -28,6 +28,7 @@ CREATE TABLE user_settings (
     language VARCHAR(10) DEFAULT 'en',
     dark_mode BOOLEAN DEFAULT false,
     notifications_enabled BOOLEAN DEFAULT true,
+    email_notifications BOOLEAN DEFAULT true,
     consent_to_terms BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
