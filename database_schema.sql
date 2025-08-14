@@ -108,7 +108,7 @@ CREATE TABLE audit_logs (
     id BIGSERIAL PRIMARY KEY NOT NULL,
     user_id BIGSERIAL REFERENCES users(id) ON DELETE CASCADE,
     action VARCHAR(50) NOT NULL,
-    target_id BIGSERIAL,
+    target_id BIGINT NULL,  -- Changed from BIGSERIAL to BIGINT NULL
     metadata JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -176,10 +176,9 @@ CREATE TRIGGER update_payments_updated_at BEFORE UPDATE ON payments
 
 -- Insert default contribution types
 INSERT INTO contribution_types (name, amount, description, created_by) VALUES
-('Monthly Contribution', 10000.00, 'Standard monthly contribution for all members', NULL),
 ('Annual Membership Fee', 50000.00, 'Annual membership fee for active participation', NULL),
-('Special Project Fund', 25000.00, 'Contribution for special union projects and initiatives', NULL),
-('Emergency Fund', 15000.00, 'Emergency fund for member assistance', NULL);
+('Emergency Fund', 15000.00, 'Emergency fund for member assistance', NULL),
+('Special Project Fund', 25000.00, 'Contribution for special union projects and initiatives', NULL);
 
 -- Insert default admin user (password: Admin@123)
 -- Note: In production, create this user through the API with a secure password

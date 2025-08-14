@@ -40,8 +40,11 @@ const getProfile = async (req, res) => {
 
     const profileQuery = await db.query(
       `SELECT u.id, u.full_name, u.username, u.email, u.phone_number, 
-              u.profile_picture, u.role, u.created_at,
-              us.language, us.dark_mode, us.notifications_enabled, us.consent_to_terms
+              u.profile_picture, u.role, u.is_active, u.created_at, u.updated_at,
+              us.id as settings_id, us.user_id as settings_user_id, us.language, 
+              us.dark_mode, us.notifications_enabled, us.email_notifications,
+              us.sms_notifications, us.consent_to_terms, us.timezone, us.currency,
+              us.created_at as settings_created_at, us.updated_at as settings_updated_at
        FROM users u
        LEFT JOIN user_settings us ON u.id = us.user_id
        WHERE u.id = $1`,
@@ -57,9 +60,41 @@ const getProfile = async (req, res) => {
 
     const profile = profileQuery.rows[0];
 
+    // Separate user info and settings
+    const user = {
+      id: profile.id,
+      full_name: profile.full_name,
+      username: profile.username,
+      email: profile.email,
+      phone_number: profile.phone_number,
+      profile_picture: profile.profile_picture,
+      role: profile.role,
+      is_active: profile.is_active,
+      created_at: profile.created_at,
+      updated_at: profile.updated_at
+    };
+
+    const settings = profile.settings_id ? {
+      id: profile.settings_id,
+      user_id: profile.settings_user_id,
+      language: profile.language,
+      dark_mode: profile.dark_mode,
+      notifications_enabled: profile.notifications_enabled,
+      email_notifications: profile.email_notifications,
+      sms_notifications: profile.sms_notifications,
+      consent_to_terms: profile.consent_to_terms,
+      timezone: profile.timezone,
+      currency: profile.currency,
+      created_at: profile.settings_created_at,
+      updated_at: profile.settings_updated_at
+    } : null;
+
     res.json({
       success: true,
-      data: { profile }
+      data: { 
+        user,
+        settings
+      }
     });
   } catch (error) {
     console.error('Get profile error:', error);
