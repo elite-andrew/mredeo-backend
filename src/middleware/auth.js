@@ -25,21 +25,31 @@ const authenticateToken = async (req, res, next) => {
 
     if (userQuery.rows.length === 0) {
       // Create a lightweight local user record if not exists
-      const base = (email || phone_number || uid || 'member').toString();
-      const safe = base.replace(/[^a-zA-Z0-9._-]/g, '');
+      // Full name is required during signup, so we can rely on it
+      const derivedName = (name && String(name).trim().length > 0)
+        ? String(name).trim()
+        : 'Unknown User'; // This should rarely happen since full name is required
+      const fullName = String(derivedName).substring(0, 100);
+      
+      // Generate username from full name: "John Doe" -> "john_doe"
+      let baseUsername = fullName.toLowerCase()
+        .trim()
+        .replace(/\s+/g, '_')  // Replace spaces with underscores
+        .replace(/[^a-zA-Z0-9._-]/g, ''); // Remove special characters except ._-
+      
+      // Ensure username is not empty
+      if (!baseUsername || baseUsername.length < 2) {
+        baseUsername = `user_${uid.substring(0, 8)}`;
+      }
+      
       const mkUsername = (seed) => {
         if (!seed) return `user_${uid.substring(0, 12)}`;
         if (seed.length <= 50) return seed;
         // Keep both prefix and suffix to minimize collisions
         return `${seed.substring(0, 30)}-${seed.substring(seed.length - 10)}`;
       };
-      let username = mkUsername(safe);
-      // Derive a safe full name: prefer token name, else email local, else phone, else uid
-      const emailLocal = (email && email.includes('@')) ? email.split('@')[0] : null;
-      const derivedName = (name && String(name).trim().length > 0)
-        ? String(name).trim()
-        : (emailLocal || phone_number || `user_${uid.substring(0, 6)}`);
-      const fullName = String(derivedName).substring(0, 100);
+      let username = mkUsername(baseUsername);
+      
       let attempt = 0;
       while (attempt < 3) {
         try {

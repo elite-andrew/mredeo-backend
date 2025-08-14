@@ -16,12 +16,12 @@ router.put('/',
   profileController.updateProfile
 );
 
-router.post('/upload-picture', 
+router.post('/picture', 
   auditMiddleware.profileUpdate, 
   profileController.uploadProfilePicture
 );
 
-router.put('/change-password', 
+router.put('/password', 
   auditMiddleware.profileUpdate, 
   profileController.changePassword
 );

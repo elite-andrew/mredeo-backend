@@ -1,4 +1,5 @@
 const { body, param, query, validationResult } = require('express-validator');
+const validator = require('validator');
 
 const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
@@ -137,6 +138,19 @@ const validateProfileUpdate = [
     .isEmail()
     .normalizeEmail()
     .withMessage('Valid email required'),
+  body('phone_number')
+    .optional()
+    .custom((value) => {
+      // Allow empty string, null, or undefined (these mean "no phone number")
+      if (!value || value.trim() === '') {
+        return true;
+      }
+      // For non-empty values, validate as mobile phone
+      if (!validator.isMobilePhone(value)) {
+        throw new Error('Valid phone number required');
+      }
+      return true;
+    }),
   handleValidationErrors
 ];
 

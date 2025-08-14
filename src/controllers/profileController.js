@@ -6,26 +6,51 @@ const db = require('../config/database');
 const config = require('../config/environment');
 
 // Configure multer for file uploads
+const ensureUploadDir = async () => {
+  try {
+    await fs.mkdir(config.upload.path, { recursive: true });
+  } catch (error) {
+    console.error('Failed to create upload directory:', error);
+  }
+};
+
+// Ensure upload directory exists
+ensureUploadDir();
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, config.upload.path);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, `profile-${req.user.id}-${uniqueSuffix}${path.extname(file.originalname)}`);
+    const userId = req.user?.id || 'unknown';
+    cb(null, `profile-${userId}-${uniqueSuffix}${path.extname(file.originalname)}`);
   }
 });
 
 const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
+    console.log('File filter check:');
+    console.log('Original name:', file.originalname);
+    console.log('MIME type:', file.mimetype);
+    console.log('Field name:', file.fieldname);
+    
     const allowedTypes = /jpeg|jpg|png|gif/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-    const mimetype = allowedTypes.test(file.mimetype);
+    const validMimeTypes = /jpeg|jpg|png|gif|octet-stream/; // Include octet-stream for Flutter uploads
+    const mimetype = validMimeTypes.test(file.mimetype);
+    
+    console.log('Extension test:', extname);
+    console.log('MIME type test:', mimetype);
+    console.log('File extension:', path.extname(file.originalname).toLowerCase());
 
-    if (mimetype && extname) {
+    // Accept file if extension is valid (since Flutter often sends octet-stream)
+    if (extname) {
+      console.log('File accepted based on extension');
       return cb(null, true);
     } else {
+      console.log('File rejected - invalid extension');
       cb(new Error('Only image files (JPEG, JPG, PNG, GIF) are allowed'));
     }
   },
@@ -59,6 +84,9 @@ const getProfile = async (req, res) => {
     }
 
     const profile = profileQuery.rows[0];
+    console.log('GET Profile - Profile picture from DB:', profile.profile_picture);
+    console.log('GET Profile - User ID:', userId);
+    console.log('GET Profile - Full user data:', JSON.stringify(profile, null, 2));
 
     // Separate user info and settings
     const user = {
@@ -91,7 +119,7 @@ const getProfile = async (req, res) => {
 
     res.json({
       success: true,
-      data: { 
+      data: {
         user,
         settings
       }
@@ -108,7 +136,7 @@ const getProfile = async (req, res) => {
 const updateProfile = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { full_name, email } = req.body;
+    const { full_name, email, phone_number } = req.body;
 
     const updateFields = [];
     const queryParams = [];
@@ -139,6 +167,30 @@ const updateProfile = async (req, res) => {
       queryParams.push(email);
     }
 
+    if (phone_number !== undefined) {
+      // Handle empty phone number (set to null)
+      const cleanPhoneNumber = phone_number?.trim() === '' ? null : phone_number;
+      
+      // Check if phone number is already taken by another user (only if not null/empty)
+      if (cleanPhoneNumber) {
+        const phoneCheck = await db.query(
+          'SELECT id FROM users WHERE phone_number = $1 AND id != $2',
+          [cleanPhoneNumber, userId]
+        );
+
+        if (phoneCheck.rows.length > 0) {
+          return res.status(409).json({
+            success: false,
+            message: 'Phone number is already taken'
+          });
+        }
+      }
+
+      paramCount++;
+      updateFields.push(`phone_number = $${paramCount}`);
+      queryParams.push(cleanPhoneNumber);
+    }
+
     if (updateFields.length === 0) {
       return res.status(400).json({
         success: false,
@@ -151,16 +203,16 @@ const updateProfile = async (req, res) => {
 
     const updateQuery = `
       UPDATE users 
-      SET ${updateFields.join(', ')} 
+      SET ${updateFields.join(', ')}, updated_at = CURRENT_TIMESTAMP
       WHERE id = $${paramCount} 
-      RETURNING id, full_name, username, email, phone_number, profile_picture, role`;
+      RETURNING id, full_name, username, email, phone_number, profile_picture, role, is_active, created_at, updated_at`;
 
     const result = await db.query(updateQuery, queryParams);
 
     res.json({
       success: true,
       message: 'Profile updated successfully',
-      data: { profile: result.rows[0] }
+      data: { user: result.rows[0] }
     });
   } catch (error) {
     console.error('Update profile error:', error);
@@ -172,8 +224,14 @@ const updateProfile = async (req, res) => {
 };
 
 const uploadProfilePicture = async (req, res) => {
-  upload.single('profile_picture')(req, res, async (err) => {
+  console.log('Upload request received');
+  console.log('User:', req.user);
+  console.log('Headers:', req.headers);
+  
+  upload.single('picture')(req, res, async (err) => {
+    console.log('Multer processing...');
     if (err) {
+      console.error('Multer error:', err);
       if (err instanceof multer.MulterError) {
         if (err.code === 'LIMIT_FILE_SIZE') {
           return res.status(400).json({
@@ -188,7 +246,9 @@ const uploadProfilePicture = async (req, res) => {
       });
     }
 
+    console.log('File received:', req.file);
     if (!req.file) {
+      console.log('No file in request');
       return res.status(400).json({
         success: false,
         message: 'No file uploaded'
@@ -207,10 +267,12 @@ const uploadProfilePicture = async (req, res) => {
       );
 
       // Update profile picture in database
-      await db.query(
-        'UPDATE users SET profile_picture = $1 WHERE id = $2',
+      const updateResult = await db.query(
+        'UPDATE users SET profile_picture = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING profile_picture',
         [filepath, userId]
       );
+      
+      console.log('Database updated - Profile picture:', updateResult.rows[0]?.profile_picture);
 
       // Delete old profile picture if exists
       if (currentProfileQuery.rows[0]?.profile_picture) {
@@ -223,23 +285,25 @@ const uploadProfilePicture = async (req, res) => {
         }
       }
 
-      res.json({
+      const response = {
         success: true,
         message: 'Profile picture updated successfully',
         data: {
-          profile_picture: filepath
+          profile_picture_url: filepath
         }
-      });
+      };
+      
+      res.json(response);
     } catch (error) {
       console.error('Upload profile picture error:', error);
-      
+
       // Clean up uploaded file on error
       try {
         await fs.unlink(req.file.path);
       } catch (deleteError) {
         console.error('Error cleaning up uploaded file:', deleteError);
       }
-      
+
       res.status(500).json({
         success: false,
         message: 'Internal server error'
@@ -249,11 +313,38 @@ const uploadProfilePicture = async (req, res) => {
 };
 
 const changePassword = async (req, res) => {
-  // Redirect password changes to Firebase client SDK
-  return res.status(400).json({
-    success: false,
-    message: 'Change password via Firebase Authentication on the client.'
-  });
+  try {
+    const { current_password, new_password } = req.body;
+
+    if (!current_password || !new_password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Current password and new password are required'
+      });
+    }
+
+    if (new_password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 6 characters long'
+      });
+    }
+
+    // Since we're using Firebase Auth, password changes should be handled on the client side
+    // This endpoint is mainly for validation and audit logging
+    // The actual password change happens through Firebase Auth SDK on the client
+    
+    return res.json({
+      success: true,
+      message: 'Password change request received. Please complete the process through the app.'
+    });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
 };
 
 const updateSettings = async (req, res) => {
@@ -308,7 +399,7 @@ const updateSettings = async (req, res) => {
         RETURNING language, dark_mode, notifications_enabled, consent_to_terms`;
 
       const result = await db.query(updateQuery, queryParams);
-      
+
       res.json({
         success: true,
         message: 'Settings updated successfully',
@@ -322,7 +413,7 @@ const updateSettings = async (req, res) => {
         RETURNING language, dark_mode, notifications_enabled, consent_to_terms`;
 
       const result = await db.query(insertQuery, queryParams);
-      
+
       res.json({
         success: true,
         message: 'Settings created successfully',
