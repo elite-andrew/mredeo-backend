@@ -35,7 +35,7 @@ const userValidators = {
 
   role: body('role')
     .optional()
-    .isIn(['member', 'admin_chairperson', 'admin_secretary', 'admin_signatory'])
+    .isIn(['member', 'admin_chairperson', 'admin_secretary', 'admin_signatory', 'admin_treasurer'])
     .withMessage('Invalid role specified')
 };
 

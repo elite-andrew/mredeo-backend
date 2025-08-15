@@ -14,7 +14,7 @@ CREATE TABLE users (
     phone_number VARCHAR(20) UNIQUE,
     -- password_hash removed in Firebase migration
     profile_picture VARCHAR(500),
-    role VARCHAR(30) DEFAULT 'member' CHECK (role IN ('member', 'admin_chairperson', 'admin_secretary', 'admin_signatory')),
+    role VARCHAR(30) DEFAULT 'member' CHECK (role IN ('member', 'admin_chairperson', 'admin_secretary', 'admin_signatory', 'admin_treasurer')),
     is_active BOOLEAN DEFAULT true,
     is_deleted BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -72,15 +72,29 @@ CREATE TABLE payments (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Issued payments table (admin payments to members)
+-- Issued payments table (admin payments to members with dual authorization)
 CREATE TABLE issued_payments (
     id BIGSERIAL PRIMARY KEY NOT NULL,
-    issued_by BIGSERIAL REFERENCES users(id),
+    issued_by BIGSERIAL REFERENCES users(id), -- Legacy field, kept for backward compatibility
     issued_to BIGSERIAL REFERENCES users(id),
     amount DECIMAL(15,2) NOT NULL,
     purpose TEXT NOT NULL,
     transaction_reference VARCHAR(100) UNIQUE NOT NULL,
-    issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Dual Authorization Fields
+    initiated_by BIGSERIAL REFERENCES users(id), -- Financial authority who initiated (chairperson, secretary, or treasurer)
+    approved_by BIGSERIAL REFERENCES users(id), -- Signatory who approved the payment
+    approval_status VARCHAR(20) DEFAULT 'pending' CHECK (approval_status IN ('pending', 'approved', 'rejected')),
+    approved_at TIMESTAMP,
+    rejection_reason TEXT,
+    
+    -- Payment Provider Integration Fields
+    payment_provider_reference VARCHAR(100), -- Reference ID from payment provider (Vodacom, Tigo, Airtel, etc.)
+    payment_status VARCHAR(20) DEFAULT 'pending' CHECK (payment_status IN ('pending', 'processing', 'completed', 'failed', 'provider_failed')),
+    provider_error TEXT, -- Error message from payment provider if payment failed
+    
+    -- Timestamps
+    issued_at TIMESTAMP, -- When payment was actually sent to provider
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -254,11 +268,61 @@ COMMENT ON TABLE notification_reads IS 'Tracking notification read status';
 COMMENT ON TABLE user_contribution_status IS 'Tracks individual user payment status for each contribution request';
 COMMENT ON TABLE audit_logs IS 'System activity audit trail';
 
-COMMENT ON COLUMN users.role IS 'User role: member, admin_chairperson, admin_secretary, admin_signatory';
+COMMENT ON COLUMN users.role IS 'User role: member, admin_chairperson, admin_secretary, admin_signatory, admin_treasurer';
 COMMENT ON COLUMN users.is_active IS 'Whether user account is active';
 COMMENT ON COLUMN users.is_deleted IS 'Soft delete flag';
 COMMENT ON COLUMN payments.payment_status IS 'Payment status: pending, success, failed, cancelled';
 COMMENT ON COLUMN otps.purpose IS 'OTP purpose: signup, login, reset_password';
+
+-- Dual Authorization and Payment Provider Comments
+COMMENT ON COLUMN issued_payments.initiated_by IS 'User who initiated the payment (chairperson, secretary, or treasurer)';
+COMMENT ON COLUMN issued_payments.approved_by IS 'User who approved the payment (signatory)';
+COMMENT ON COLUMN issued_payments.approval_status IS 'Current approval status of the payment';
+COMMENT ON COLUMN issued_payments.approved_at IS 'Timestamp when payment was approved';
+COMMENT ON COLUMN issued_payments.rejection_reason IS 'Reason for payment rejection if applicable';
+COMMENT ON COLUMN issued_payments.payment_provider_reference IS 'Reference ID from payment provider (Vodacom, Tigo, Airtel, etc.)';
+COMMENT ON COLUMN issued_payments.payment_status IS 'Status of actual payment processing with provider';
+COMMENT ON COLUMN issued_payments.provider_error IS 'Error message from payment provider if payment failed';
+
+-- Indexes for better query performance
+-- User indexes
+CREATE INDEX idx_users_role ON users(role);
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_phone_number ON users(phone_number);
+CREATE INDEX idx_users_is_active ON users(is_active);
+
+-- Payment indexes
+CREATE INDEX idx_payments_user_id ON payments(user_id);
+CREATE INDEX idx_payments_status ON payments(payment_status);
+CREATE INDEX idx_payments_created_at ON payments(created_at);
+
+-- Issued payments dual authorization indexes
+CREATE INDEX idx_issued_payments_approval_status ON issued_payments(approval_status);
+CREATE INDEX idx_issued_payments_initiated_by ON issued_payments(initiated_by);
+CREATE INDEX idx_issued_payments_approved_by ON issued_payments(approved_by);
+CREATE INDEX idx_issued_payments_payment_status ON issued_payments(payment_status);
+CREATE INDEX idx_issued_payments_provider_reference ON issued_payments(payment_provider_reference);
+CREATE INDEX idx_issued_payments_issued_to ON issued_payments(issued_to);
+
+-- Notification indexes
+CREATE INDEX idx_notifications_sender_id ON notifications(sender_id);
+CREATE INDEX idx_notifications_type ON notifications(notification_type);
+CREATE INDEX idx_notifications_is_active ON notifications(is_active);
+CREATE INDEX idx_notifications_created_at ON notifications(created_at);
+
+-- User contribution status indexes
+CREATE INDEX idx_user_contribution_status_user_id ON user_contribution_status(user_id);
+CREATE INDEX idx_user_contribution_status_notification_id ON user_contribution_status(notification_id);
+CREATE INDEX idx_user_contribution_status_payment_status ON user_contribution_status(payment_status);
+
+-- Audit log indexes
+CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
+
+-- Optional constraints (uncomment if needed)
+-- ALTER TABLE issued_payments ADD CONSTRAINT chk_different_initiator_approver 
+-- CHECK (initiated_by != approved_by);
 
 -- Sample data for testing (remove in production)
 -- INSERT INTO users (full_name, username, email, phone_number, password_hash, is_active) VALUES

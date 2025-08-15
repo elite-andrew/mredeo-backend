@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
 const { authenticateToken } = require('../middleware/auth');
-const { isAdmin } = require('../middleware/rbac');
+const { isAdmin, canIssuePayments, canSignPayments } = require('../middleware/rbac');
 
 // All admin routes require authentication and admin role
 router.use(authenticateToken);
@@ -29,5 +29,15 @@ router.get('/export/users', adminController.exportUserData);
 
 // System maintenance
 router.post('/maintenance', adminController.performSystemMaintenance);
+
+// Dual Authorization Payment System
+// Routes for financial authorities (chairperson, secretary, treasurer)
+router.post('/payments/initiate', canIssuePayments, adminController.initiatePayment);
+router.get('/payments/history', adminController.getPaymentHistory);
+
+// Routes for signatories (signatory role only)
+router.get('/payments/pending', canSignPayments, adminController.getPendingPayments);
+router.put('/payments/:payment_id/approve', canSignPayments, adminController.approvePayment);
+router.put('/payments/:payment_id/reject', canSignPayments, adminController.rejectPayment);
 
 module.exports = router;

@@ -3,7 +3,8 @@ module.exports = {
     MEMBER: 'member',
     ADMIN_CHAIRPERSON: 'admin_chairperson',
     ADMIN_SECRETARY: 'admin_secretary',
-    ADMIN_SIGNATORY: 'admin_signatory'
+    ADMIN_SIGNATORY: 'admin_signatory',
+    ADMIN_TREASURER: 'admin_treasurer'
   },
   
   PAYMENT_STATUS: {

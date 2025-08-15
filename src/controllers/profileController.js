@@ -330,6 +330,29 @@ const changePassword = async (req, res) => {
       });
     }
 
+    // Check if new password is the same as current password
+    if (current_password === new_password) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be different from your current password'
+      });
+    }
+
+    // Additional password strength validation
+    if (!/[A-Za-z]/.test(new_password)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must contain at least one letter'
+      });
+    }
+
+    if (!/[0-9]/.test(new_password)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password must contain at least one number'
+      });
+    }
+
     // Since we're using Firebase Auth, password changes should be handled on the client side
     // This endpoint is mainly for validation and audit logging
     // The actual password change happens through Firebase Auth SDK on the client
