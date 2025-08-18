@@ -55,11 +55,12 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 const startServer = async () => {
   await testConnection();
   
-  const server = app.listen(config.PORT, () => {
+  const server = app.listen(config.PORT, '0.0.0.0', () => {
     console.log('🚀 MREDEO Backend Server Started');
     console.log(`📍 Environment: ${config.NODE_ENV}`);
     console.log(`🌐 Server running on port: ${config.PORT}`);
-    console.log(`📡 API Base URL: http://localhost:${config.PORT}/api/${config.API_VERSION}`);
+    console.log(`📡 Local API: http://localhost:${config.PORT}/api/${config.API_VERSION}`);
+    console.log(`🌍 Network API: http://0.0.0.0:${config.PORT}/api/${config.API_VERSION}`);
     console.log(`🏥 Health Check: http://localhost:${config.PORT}/api/${config.API_VERSION}/health`);
   });
 
