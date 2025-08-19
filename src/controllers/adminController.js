@@ -863,6 +863,103 @@ const getPaymentHistory = async (req, res) => {
   }
 };
 
+const getIssuedPayments = async (req, res) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 50, 
+      start_date, 
+      end_date, 
+      type,
+      search 
+    } = req.query;
+    
+    const offset = (page - 1) * limit;
+    
+    let whereConditions = ['p.approval_status = $3']; // Only approved payments
+    let queryParams = [limit, offset, 'approved'];
+    let paramCount = 3;
+    
+    if (start_date) {
+      whereConditions.push(`p.created_at >= $${++paramCount}`);
+      queryParams.push(start_date);
+    }
+    
+    if (end_date) {
+      whereConditions.push(`p.created_at <= $${++paramCount}`);
+      queryParams.push(end_date);
+    }
+    
+    if (type && type !== 'All') {
+      whereConditions.push(`p.contribution_type ILIKE $${++paramCount}`);
+      queryParams.push(`%${type}%`);
+    }
+    
+    if (search) {
+      whereConditions.push(`(u2.full_name ILIKE $${++paramCount} OR p.purpose ILIKE $${paramCount})`);
+      queryParams.push(`%${search}%`);
+    }
+    
+    const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
+    
+    const query = `
+      SELECT p.id, 
+             p.issued_to,
+             p.amount,
+             p.purpose,
+             p.contribution_type as type,
+             p.purpose as description,
+             p.transaction_reference,
+             p.created_at,
+             p.approved_at as issued_at,
+             u2.full_name as member_name,
+             u2.phone_number as member_phone,
+             u1.full_name as issued_by_name
+      FROM issued_payments p
+      JOIN users u1 ON p.initiated_by = u1.id
+      JOIN users u2 ON p.issued_to = u2.id
+      ${whereClause}
+      ORDER BY p.created_at DESC
+      LIMIT $1 OFFSET $2
+    `;
+    
+    const countQuery = `
+      SELECT COUNT(*) 
+      FROM issued_payments p
+      JOIN users u1 ON p.initiated_by = u1.id
+      JOIN users u2 ON p.issued_to = u2.id
+      ${whereClause}
+    `;
+    const countParams = queryParams.slice(2); // Remove limit and offset
+    
+    const [paymentsResult, countResult] = await Promise.all([
+      db.query(query, queryParams),
+      db.query(countQuery, countParams)
+    ]);
+    
+    const total = parseInt(countResult.rows[0].count);
+    
+    res.json({
+      success: true,
+      data: {
+        payments: paymentsResult.rows,
+        pagination: {
+          current_page: parseInt(page),
+          per_page: parseInt(limit),
+          total_pages: Math.ceil(total / limit),
+          total_records: total
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get issued payments error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   getDashboardStats,
   getAllUsers,
@@ -881,5 +978,6 @@ module.exports = {
   approvePayment,
   rejectPayment,
   getPendingPayments,
-  getPaymentHistory
+  getPaymentHistory,
+  getIssuedPayments
 };

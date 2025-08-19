@@ -34,6 +34,7 @@ router.post('/maintenance', adminController.performSystemMaintenance);
 // Routes for financial authorities (chairperson, secretary, treasurer)
 router.post('/payments/initiate', canIssuePayments, adminController.initiatePayment);
 router.get('/payments/history', adminController.getPaymentHistory);
+router.get('/payments/issued', adminController.getIssuedPayments);
 
 // Routes for signatories (signatory role only)
 router.get('/payments/pending', canSignPayments, adminController.getPendingPayments);

@@ -93,9 +93,15 @@ CREATE TABLE issued_payments (
     payment_status VARCHAR(20) DEFAULT 'pending' CHECK (payment_status IN ('pending', 'processing', 'completed', 'failed', 'provider_failed')),
     provider_error TEXT, -- Error message from payment provider if payment failed
     
+    -- Workflow Enhancement Fields
+    contribution_type VARCHAR(100),
+    beneficiary_details JSONB,
+    is_emergency_fund BOOLEAN DEFAULT false,
+    
     -- Timestamps
     issued_at TIMESTAMP, -- When payment was actually sent to provider
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Notifications table
@@ -104,10 +110,12 @@ CREATE TABLE notifications (
     sender_id BIGSERIAL REFERENCES users(id),
     title VARCHAR(100) NOT NULL,
     message TEXT NOT NULL,
-    notification_type VARCHAR(20) DEFAULT 'general' CHECK (notification_type IN ('general', 'contribution_request', 'payment_reminder')),
+    notification_type VARCHAR(20) DEFAULT 'general' CHECK (notification_type IN ('general', 'contribution_request', 'payment_reminder', 'emergency_contribution')),
     contribution_type_id BIGSERIAL REFERENCES contribution_types(id),
     due_date DATE,
     is_active BOOLEAN DEFAULT true,
+    beneficiary_user_id BIGSERIAL REFERENCES users(id) ON DELETE SET NULL,
+    emergency_details JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -148,6 +156,24 @@ CREATE TABLE audit_logs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Pending actions table (for admin dashboard workflow)
+CREATE TABLE pending_actions (
+    id BIGSERIAL PRIMARY KEY NOT NULL,
+    action_type VARCHAR(50) NOT NULL CHECK (action_type IN ('payment_due', 'approval_needed', 'emergency_contribution', 'overdue_payment')),
+    related_notification_id BIGSERIAL REFERENCES notifications(id) ON DELETE CASCADE,
+    beneficiary_user_id BIGSERIAL REFERENCES users(id) ON DELETE CASCADE,
+    due_date DATE,
+    priority VARCHAR(20) DEFAULT 'normal' CHECK (priority IN ('high', 'normal', 'low')),
+    is_resolved BOOLEAN DEFAULT false,
+    resolved_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    -- Additional context fields
+    contribution_type VARCHAR(100),
+    expected_amount DECIMAL(15,2),
+    description TEXT
+);
+
 -- Payment activities table (for tracking payment-related activities)
 CREATE TABLE payment_activities (
     id BIGSERIAL PRIMARY KEY NOT NULL,
@@ -180,6 +206,8 @@ CREATE INDEX idx_notifications_sender ON notifications(sender_id);
 CREATE INDEX idx_notifications_created ON notifications(created_at);
 CREATE INDEX idx_notifications_type ON notifications(notification_type);
 CREATE INDEX idx_notifications_contribution_type ON notifications(contribution_type_id);
+CREATE INDEX idx_notifications_beneficiary_user_id ON notifications(beneficiary_user_id);
+CREATE INDEX idx_notifications_due_date ON notifications(due_date);
 
 CREATE INDEX idx_user_contribution_status_user ON user_contribution_status(user_id);
 CREATE INDEX idx_user_contribution_status_notification ON user_contribution_status(notification_id);
@@ -193,6 +221,21 @@ CREATE INDEX idx_notification_reads_status ON notification_reads(is_read);
 CREATE INDEX idx_audit_logs_user ON audit_logs(user_id);
 CREATE INDEX idx_audit_logs_action ON audit_logs(action);
 CREATE INDEX idx_audit_logs_created ON audit_logs(created_at);
+
+-- Indexes for pending_actions table
+CREATE INDEX idx_pending_actions_action_type ON pending_actions(action_type);
+CREATE INDEX idx_pending_actions_is_resolved ON pending_actions(is_resolved);
+CREATE INDEX idx_pending_actions_priority ON pending_actions(priority);
+CREATE INDEX idx_pending_actions_due_date ON pending_actions(due_date);
+CREATE INDEX idx_pending_actions_beneficiary ON pending_actions(beneficiary_user_id);
+CREATE INDEX idx_pending_actions_notification ON pending_actions(related_notification_id);
+CREATE INDEX idx_pending_actions_created_at ON pending_actions(created_at);
+CREATE INDEX idx_pending_actions_status_priority ON pending_actions(is_resolved, priority, due_date);
+
+-- Indexes for enhanced issued_payments fields
+CREATE INDEX idx_issued_payments_contribution_type ON issued_payments(contribution_type);
+CREATE INDEX idx_issued_payments_is_emergency_fund ON issued_payments(is_emergency_fund);
+CREATE INDEX idx_issued_payments_updated_at ON issued_payments(updated_at);
 
 -- Functions and triggers for updated_at timestamps
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -217,6 +260,9 @@ CREATE TRIGGER update_payments_updated_at BEFORE UPDATE ON payments
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_user_contribution_status_updated_at BEFORE UPDATE ON user_contribution_status
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_issued_payments_updated_at BEFORE UPDATE ON issued_payments
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Insert default contribution types
@@ -251,6 +297,50 @@ SELECT
     AVG(CASE WHEN payment_status = 'success' THEN amount_paid END) as average_payment_amount
 FROM payments;
 
+-- View for admin dashboard pending actions with user details
+CREATE VIEW admin_pending_actions AS
+SELECT 
+    pa.*,
+    u.full_name as beneficiary_name,
+    u.phone_number as beneficiary_phone,
+    u.email as beneficiary_email,
+    n.title as notification_title,
+    n.due_date as notification_due_date,
+    ct.name as contribution_type_name,
+    ct.amount as contribution_amount,
+    CASE 
+        WHEN pa.due_date < CURRENT_DATE AND NOT pa.is_resolved THEN 'overdue'
+        WHEN pa.due_date <= CURRENT_DATE + INTERVAL '3 days' AND NOT pa.is_resolved THEN 'due_soon'
+        WHEN pa.is_resolved THEN 'resolved'
+        ELSE 'pending'
+    END as status_category
+FROM pending_actions pa
+LEFT JOIN users u ON pa.beneficiary_user_id = u.id
+LEFT JOIN notifications n ON pa.related_notification_id = n.id
+LEFT JOIN contribution_types ct ON ct.name = pa.contribution_type;
+
+-- View for member contribution dashboard
+CREATE VIEW member_contribution_dashboard AS
+SELECT 
+    ucs.*,
+    u.full_name as member_name,
+    ct.name as contribution_type_name,
+    ct.amount as contribution_type_amount,
+    n.title as notification_title,
+    n.message as notification_message,
+    n.due_date,
+    n.notification_type,
+    CASE 
+        WHEN n.due_date < CURRENT_DATE AND ucs.payment_status != 'paid' THEN 'overdue'
+        WHEN n.due_date <= CURRENT_DATE + INTERVAL '3 days' AND ucs.payment_status != 'paid' THEN 'due_soon'
+        ELSE ucs.payment_status
+    END as status_with_urgency
+FROM user_contribution_status ucs
+JOIN users u ON ucs.user_id = u.id
+JOIN notifications n ON ucs.notification_id = n.id
+JOIN contribution_types ct ON ucs.contribution_type_id = ct.id
+WHERE n.is_active = true;
+
 -- Grant permissions (adjust as needed for your setup)
 -- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO mredeo_user;
 -- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO mredeo_user;
@@ -267,12 +357,23 @@ COMMENT ON TABLE notifications IS 'System notifications and contribution request
 COMMENT ON TABLE notification_reads IS 'Tracking notification read status';
 COMMENT ON TABLE user_contribution_status IS 'Tracks individual user payment status for each contribution request';
 COMMENT ON TABLE audit_logs IS 'System activity audit trail';
+COMMENT ON TABLE pending_actions IS 'Tracks pending actions for admin dashboard - payments due, approvals needed, etc.';
 
 COMMENT ON COLUMN users.role IS 'User role: member, admin_chairperson, admin_secretary, admin_signatory, admin_treasurer';
 COMMENT ON COLUMN users.is_active IS 'Whether user account is active';
 COMMENT ON COLUMN users.is_deleted IS 'Soft delete flag';
 COMMENT ON COLUMN payments.payment_status IS 'Payment status: pending, success, failed, cancelled';
 COMMENT ON COLUMN otps.purpose IS 'OTP purpose: signup, login, reset_password';
+
+-- Workflow Enhancement Comments
+COMMENT ON COLUMN notifications.beneficiary_user_id IS 'User ID of the beneficiary for emergency contributions';
+COMMENT ON COLUMN notifications.emergency_details IS 'JSON details for emergency contributions (reason, medical info, etc.)';
+COMMENT ON COLUMN issued_payments.contribution_type IS 'Type of contribution this payment relates to';
+COMMENT ON COLUMN issued_payments.beneficiary_details IS 'JSON details about the beneficiary and payment context';
+COMMENT ON COLUMN issued_payments.is_emergency_fund IS 'Whether this is an emergency fund payment';
+COMMENT ON COLUMN pending_actions.action_type IS 'Type of pending action: payment_due, approval_needed, emergency_contribution';
+COMMENT ON COLUMN pending_actions.priority IS 'Priority level: high, normal, low';
+COMMENT ON COLUMN pending_actions.is_resolved IS 'Whether the pending action has been resolved';
 
 -- Dual Authorization and Payment Provider Comments
 COMMENT ON COLUMN issued_payments.initiated_by IS 'User who initiated the payment (chairperson, secretary, or treasurer)';
@@ -283,42 +384,6 @@ COMMENT ON COLUMN issued_payments.rejection_reason IS 'Reason for payment reject
 COMMENT ON COLUMN issued_payments.payment_provider_reference IS 'Reference ID from payment provider (Vodacom, Tigo, Airtel, etc.)';
 COMMENT ON COLUMN issued_payments.payment_status IS 'Status of actual payment processing with provider';
 COMMENT ON COLUMN issued_payments.provider_error IS 'Error message from payment provider if payment failed';
-
--- Indexes for better query performance
--- User indexes
-CREATE INDEX idx_users_role ON users(role);
-CREATE INDEX idx_users_email ON users(email);
-CREATE INDEX idx_users_phone_number ON users(phone_number);
-CREATE INDEX idx_users_is_active ON users(is_active);
-
--- Payment indexes
-CREATE INDEX idx_payments_user_id ON payments(user_id);
-CREATE INDEX idx_payments_status ON payments(payment_status);
-CREATE INDEX idx_payments_created_at ON payments(created_at);
-
--- Issued payments dual authorization indexes
-CREATE INDEX idx_issued_payments_approval_status ON issued_payments(approval_status);
-CREATE INDEX idx_issued_payments_initiated_by ON issued_payments(initiated_by);
-CREATE INDEX idx_issued_payments_approved_by ON issued_payments(approved_by);
-CREATE INDEX idx_issued_payments_payment_status ON issued_payments(payment_status);
-CREATE INDEX idx_issued_payments_provider_reference ON issued_payments(payment_provider_reference);
-CREATE INDEX idx_issued_payments_issued_to ON issued_payments(issued_to);
-
--- Notification indexes
-CREATE INDEX idx_notifications_sender_id ON notifications(sender_id);
-CREATE INDEX idx_notifications_type ON notifications(notification_type);
-CREATE INDEX idx_notifications_is_active ON notifications(is_active);
-CREATE INDEX idx_notifications_created_at ON notifications(created_at);
-
--- User contribution status indexes
-CREATE INDEX idx_user_contribution_status_user_id ON user_contribution_status(user_id);
-CREATE INDEX idx_user_contribution_status_notification_id ON user_contribution_status(notification_id);
-CREATE INDEX idx_user_contribution_status_payment_status ON user_contribution_status(payment_status);
-
--- Audit log indexes
-CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
-CREATE INDEX idx_audit_logs_action ON audit_logs(action);
-CREATE INDEX idx_audit_logs_created_at ON audit_logs(created_at);
 
 -- Optional constraints (uncomment if needed)
 -- ALTER TABLE issued_payments ADD CONSTRAINT chk_different_initiator_approver 
