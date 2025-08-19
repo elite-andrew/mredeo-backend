@@ -13,8 +13,23 @@ const authenticateToken = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Access token required' });
     }
 
-    // Verify Firebase ID token
-    const decoded = await admin.auth().verifyIdToken(idToken, true);
+    // Verify Firebase ID token with retry logic
+    let decoded;
+    let retries = 3;
+    while (retries > 0) {
+      try {
+        decoded = await admin.auth().verifyIdToken(idToken, true);
+        break;
+      } catch (error) {
+        if (error.code === 'app/network-error' && retries > 1) {
+          console.log(`Firebase network error, retrying... (${retries - 1} attempts left)`);
+          retries--;
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+          continue;
+        }
+        throw error;
+      }
+    }
 
     // Find or upsert local user by firebase uid
   const { uid, email, phone_number, name, picture } = decoded;
