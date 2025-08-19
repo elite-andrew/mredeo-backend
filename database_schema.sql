@@ -239,12 +239,12 @@ CREATE INDEX idx_issued_payments_updated_at ON issued_payments(updated_at);
 
 -- Functions and triggers for updated_at timestamps
 CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER AS '
 BEGIN
     NEW.updated_at = CURRENT_TIMESTAMP;
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+' language 'plpgsql';
 
 -- Apply the trigger to tables that need it
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users
@@ -384,14 +384,5 @@ COMMENT ON COLUMN issued_payments.rejection_reason IS 'Reason for payment reject
 COMMENT ON COLUMN issued_payments.payment_provider_reference IS 'Reference ID from payment provider (Vodacom, Tigo, Airtel, etc.)';
 COMMENT ON COLUMN issued_payments.payment_status IS 'Status of actual payment processing with provider';
 COMMENT ON COLUMN issued_payments.provider_error IS 'Error message from payment provider if payment failed';
-
--- Optional constraints (uncomment if needed)
--- ALTER TABLE issued_payments ADD CONSTRAINT chk_different_initiator_approver 
--- CHECK (initiated_by != approved_by);
-
--- Sample data for testing (remove in production)
--- INSERT INTO users (full_name, username, email, phone_number, password_hash, is_active) VALUES
--- ('John Doe', 'johndoe', 'john@example.com', '+255700000001', '$2b$12$sample_hash', true),
--- ('Jane Smith', 'janesmith', 'jane@example.com', '+255700000002', '$2b$12$sample_hash', true);
 
 -- End of schema
