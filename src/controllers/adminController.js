@@ -106,12 +106,37 @@ const updateUserRole = async (req, res) => {
   try {
     const { userId } = req.params;
     const { role } = req.body;
+    const adminId = req.user.id;
 
     const validRoles = ['member', 'admin_chairperson', 'admin_secretary', 'admin_signatory', 'admin_treasurer'];
     if (!validRoles.includes(role)) {
       return res.status(400).json({
         success: false,
         message: 'Invalid role specified'
+      });
+    }
+
+    // Get current role for audit logging
+    const currentUserQuery = await db.query(
+      'SELECT role, full_name FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (currentUserQuery.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    const oldRole = currentUserQuery.rows[0].role;
+    const userName = currentUserQuery.rows[0].full_name;
+
+    // Prevent unnecessary updates
+    if (oldRole === role) {
+      return res.status(400).json({
+        success: false,
+        message: 'User already has this role'
       });
     }
 
@@ -122,6 +147,28 @@ const updateUserRole = async (req, res) => {
         success: false,
         message: 'User not found'
       });
+    }
+
+    // Log role change for audit trail
+    console.log(`ROLE CHANGE AUDIT: Admin ${adminId} changed user ${userId} (${userName}) role from ${oldRole} to ${role}`);
+    
+    // Insert audit log entry
+    try {
+      await db.query(
+        `INSERT INTO audit_logs (user_id, action, old_value, new_value, changed_by, metadata, created_at) 
+         VALUES ($1, $2, $3, $4, $5, $6, NOW())`,
+        [
+          userId, 
+          'role_change', 
+          oldRole, 
+          role, 
+          adminId,
+          JSON.stringify({ user_name: userName, admin_id: adminId })
+        ]
+      );
+    } catch (auditError) {
+      console.error('Failed to log role change audit:', auditError);
+      // Don't fail the request if audit logging fails
     }
 
     res.json({

@@ -62,9 +62,15 @@ const upload = multer({
 const getProfile = async (req, res) => {
   try {
     const userId = req.user.id;
+    const firebaseUid = req.user.firebase?.uid;
+    const firebaseEmail = req.user.firebase?.email;
+    const sessionId = req.sessionId;
 
+    console.log(`🔍 [ROBUST AUTH] Profile Controller Debug - User ID: ${userId}, Firebase UID: ${firebaseUid}, Firebase Email: ${firebaseEmail}, Session ID: ${sessionId}`);
+
+    // Atomic profile query with robust authentication context
     const profileQuery = await db.query(
-      `SELECT u.id, u.full_name, u.username, u.email, u.phone_number, 
+      `SELECT u.id, u.firebase_uid, u.full_name, u.username, u.email, u.phone_number, 
               u.profile_picture, u.role, u.is_active, u.created_at, u.updated_at,
               us.id as settings_id, us.user_id as settings_user_id, us.language, 
               us.dark_mode, us.notifications_enabled, us.email_notifications,
@@ -72,21 +78,33 @@ const getProfile = async (req, res) => {
               us.created_at as settings_created_at, us.updated_at as settings_updated_at
        FROM users u
        LEFT JOIN user_settings us ON u.id = us.user_id
-       WHERE u.id = $1`,
-      [userId]
+       WHERE u.id = $1 AND u.firebase_uid = $2 AND u.is_active = true AND u.is_deleted = false`,
+      [userId, firebaseUid]
     );
 
     if (profileQuery.rows.length === 0) {
+      console.error(`❌ [ROBUST AUTH] Profile not found or mismatch - User ID: ${userId}, Firebase UID: ${firebaseUid}`);
       return res.status(404).json({
         success: false,
-        message: 'User not found'
+        message: 'User not found or authentication mismatch',
+        code: 'USER_NOT_FOUND'
       });
     }
 
     const profile = profileQuery.rows[0];
+    console.log(`✅ [ROBUST AUTH] Profile retrieved - User ID: ${userId}, Email: ${profile.email}, Role: ${profile.role}`);
     console.log('GET Profile - Profile picture from DB:', profile.profile_picture);
-    console.log('GET Profile - User ID:', userId);
-    console.log('GET Profile - Full user data:', JSON.stringify(profile, null, 2));
+    console.log('GET Profile - Role consistency check: DB role =', profile.role, ', Token role =', req.user.role);
+
+    // Verify Firebase UID consistency (additional security check)
+    if (profile.firebase_uid !== firebaseUid) {
+      console.error(`❌ [ROBUST AUTH] Firebase UID mismatch - Expected: ${firebaseUid}, Found: ${profile.firebase_uid}`);
+      return res.status(403).json({
+        success: false,
+        message: 'Authentication mismatch detected',
+        code: 'AUTH_MISMATCH'
+      });
+    }
 
     // Separate user info and settings
     const user = {
@@ -96,7 +114,7 @@ const getProfile = async (req, res) => {
       email: profile.email,
       phone_number: profile.phone_number,
       profile_picture: profile.profile_picture,
-      role: profile.role,
+      role: profile.role, // Always use DB role as authoritative
       is_active: profile.is_active,
       created_at: profile.created_at,
       updated_at: profile.updated_at

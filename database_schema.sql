@@ -149,12 +149,24 @@ CREATE TABLE notification_reads (
 -- Audit logs table
 CREATE TABLE audit_logs (
     id BIGSERIAL PRIMARY KEY NOT NULL,
-    user_id BIGSERIAL REFERENCES users(id) ON DELETE CASCADE,
+    user_id BIGSERIAL REFERENCES users(id) ON DELETE SET NULL,
     action VARCHAR(50) NOT NULL,
-    target_id BIGINT NULL,  -- Changed from BIGSERIAL to BIGINT NULL
-    metadata JSONB,
+    target_id BIGINT NULL,  -- ID of the target object being modified
+    old_value TEXT,         -- Previous value before change
+    new_value TEXT,         -- New value after change
+    changed_by BIGSERIAL REFERENCES users(id) ON DELETE SET NULL, -- Who made the change
+    metadata JSONB,         -- Additional context data
+    ip_address INET,        -- IP address of the user making the change
+    user_agent TEXT,        -- User agent string for tracking client info
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Indexes for audit_logs table for better performance
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_changed_by ON audit_logs(changed_by);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_target_id ON audit_logs(target_id);
 
 -- Pending actions table (for admin dashboard workflow)
 CREATE TABLE pending_actions (
@@ -356,7 +368,7 @@ COMMENT ON TABLE issued_payments IS 'Payments issued by admins to members';
 COMMENT ON TABLE notifications IS 'System notifications and contribution requests';
 COMMENT ON TABLE notification_reads IS 'Tracking notification read status';
 COMMENT ON TABLE user_contribution_status IS 'Tracks individual user payment status for each contribution request';
-COMMENT ON TABLE audit_logs IS 'System activity audit trail';
+COMMENT ON TABLE audit_logs IS 'System activity audit trail for tracking role changes, logins, and security events';
 COMMENT ON TABLE pending_actions IS 'Tracks pending actions for admin dashboard - payments due, approvals needed, etc.';
 
 COMMENT ON COLUMN users.role IS 'User role: member, admin_chairperson, admin_secretary, admin_signatory, admin_treasurer';
@@ -364,6 +376,15 @@ COMMENT ON COLUMN users.is_active IS 'Whether user account is active';
 COMMENT ON COLUMN users.is_deleted IS 'Soft delete flag';
 COMMENT ON COLUMN payments.payment_status IS 'Payment status: pending, success, failed, cancelled';
 COMMENT ON COLUMN otps.purpose IS 'OTP purpose: signup, login, reset_password';
+
+-- Audit logs table comments
+COMMENT ON COLUMN audit_logs.action IS 'Type of action performed (role_change, login_attempt, profile_update, etc.)';
+COMMENT ON COLUMN audit_logs.old_value IS 'Previous value before change (for tracking what was changed)';
+COMMENT ON COLUMN audit_logs.new_value IS 'New value after change (for tracking what it was changed to)';
+COMMENT ON COLUMN audit_logs.changed_by IS 'ID of user who made the change (for accountability)';
+COMMENT ON COLUMN audit_logs.metadata IS 'Additional context data in JSON format (user names, request details, etc.)';
+COMMENT ON COLUMN audit_logs.ip_address IS 'IP address of the user making the change (for security tracking)';
+COMMENT ON COLUMN audit_logs.user_agent IS 'User agent string for tracking client info (browser, app version, etc.)';
 
 -- Workflow Enhancement Comments
 COMMENT ON COLUMN notifications.beneficiary_user_id IS 'User ID of the beneficiary for emergency contributions';

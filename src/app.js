@@ -16,6 +16,7 @@ const paymentRoutes = require('./routes/payments');
 const contributionRoutes = require('./routes/contributions');
 const notificationRoutes = require('./routes/notifications');
 const adminRoutes = require('./routes/admin');
+const sessionRoutes = require('./routes/session');
 
 const app = express();
 
@@ -55,6 +56,7 @@ app.use(`${API_PREFIX}/payments`, paymentRoutes);
 app.use(`${API_PREFIX}/contributions`, contributionRoutes);
 app.use(`${API_PREFIX}/notifications`, notificationRoutes);
 app.use(`${API_PREFIX}/admin`, adminRoutes);
+app.use(`${API_PREFIX}/session`, sessionRoutes);
 
 // Health check endpoint
 app.get(`${API_PREFIX}/health`, (req, res) => {

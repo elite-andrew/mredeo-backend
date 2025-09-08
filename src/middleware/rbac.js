@@ -1,21 +1,53 @@
 const { USER_ROLES } = require('../config/constants');
+const db = require('../config/database');
 
-const isAdmin = (req, res, next) => {
-  const adminRoles = [
-    USER_ROLES.ADMIN_CHAIRPERSON,
-    USER_ROLES.ADMIN_SECRETARY,
-    USER_ROLES.ADMIN_SIGNATORY,
-    USER_ROLES.ADMIN_TREASURER
-  ];
-  
-  if (!adminRoles.includes(req.user.role)) {
-    return res.status(403).json({
+// Enhanced admin check that verifies role from database
+const isAdmin = async (req, res, next) => {
+  try {
+    const adminRoles = [
+      USER_ROLES.ADMIN_CHAIRPERSON,
+      USER_ROLES.ADMIN_SECRETARY,
+      USER_ROLES.ADMIN_SIGNATORY,
+      USER_ROLES.ADMIN_TREASURER
+    ];
+    
+    // Always check role from database for authoritative source
+    const userQuery = await db.query(
+      'SELECT role FROM users WHERE id = $1 AND is_active = true AND is_deleted = false',
+      [req.user.id]
+    );
+    
+    if (userQuery.rows.length === 0) {
+      return res.status(403).json({
+        success: false,
+        message: 'User not found or inactive'
+      });
+    }
+    
+    const dbRole = userQuery.rows[0].role;
+    
+    // Log role validation for debugging
+    console.log(`Role validation - User ${req.user.id}: Token role = ${req.user.role}, DB role = ${dbRole}`);
+    
+    // Use database role as authoritative source
+    req.user.authoritative_role = dbRole;
+    
+    if (!adminRoles.includes(dbRole)) {
+      console.log(`Access denied - User ${req.user.id} with role ${dbRole} attempted admin access`);
+      return res.status(403).json({
+        success: false,
+        message: 'Admin access required'
+      });
+    }
+    
+    next();
+  } catch (error) {
+    console.error('Role validation error:', error);
+    res.status(500).json({
       success: false,
-      message: 'Admin access required'
+      message: 'Role validation failed'
     });
   }
-  
-  next();
 };
 
 const isMember = (req, res, next) => {

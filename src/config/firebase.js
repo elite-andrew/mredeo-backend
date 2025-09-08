@@ -1,11 +1,11 @@
 /**
  * Firebase Admin SDK initialization.
  *
- * Reads credentials using Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS)
- * or environment variables. Falls back to projectId-only if running in a
- * trusted environment (e.g., Cloud Run) with implicit credentials.
+ * Uses the service account file directly for reliable authentication.
  */
 const admin = require('firebase-admin');
+const path = require('path');
+const fs = require('fs');
 
 let initialized = false;
 
@@ -13,13 +13,25 @@ function initFirebase() {
   if (initialized) return admin;
 
   try {
-    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    // First try to use the service account file directly
+    const serviceAccountPath = path.join(__dirname, '../../../serviceAccount.json');
+    
+    if (fs.existsSync(serviceAccountPath)) {
+      console.log('🔧 Using service account file:', serviceAccountPath);
+      const serviceAccount = require(serviceAccountPath);
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        projectId: serviceAccount.project_id,
+      });
+      console.log('✅ Firebase Admin SDK initialized with service account');
+    } else if (process.env.FIREBASE_SERVICE_ACCOUNT) {
       // Use full service account JSON provided via env var
       const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
         projectId: serviceAccount.project_id,
       });
+      console.log('✅ Firebase Admin SDK initialized with env var');
     } else if (
       process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY
     ) {
